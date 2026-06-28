@@ -10,3 +10,5 @@ env/
 .idea/
 *.log
 outputs/results/
+DEVLOG_GUIDE.md
+
