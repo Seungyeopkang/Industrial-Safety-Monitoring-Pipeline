@@ -1,5 +1,7 @@
 # VLM-Based Industrial Safety Monitoring Pipeline
 
+[![Notion Dashboard](https://img.shields.io/badge/Notion-Dashboard-black?logo=notion)](https://fuzzy-wildebeest-406.notion.site/VLM-Safety-Monitor-38d73d4932e0807e9e35df13c2611834?source=copy_link)
+
 > A three-stage AI pipeline (Detection → VLM → LLM) for automated industrial safety monitoring, inspired by real-world solutions in the computer vision AI industry.
 
 ---
