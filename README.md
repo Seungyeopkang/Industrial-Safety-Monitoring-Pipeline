@@ -23,36 +23,36 @@ The pipeline is designed to mirror real-world industrial safety AI systems, with
 
 ## Pipeline Architecture
 
-```
-Image Input (via HTML upload)
-        │
-        ▼
-┌─────────────────────┐
-│   PPE Detection     │  ← Pretrained YOLO (helmet, vest, gloves)
-│   (Bounding Box)    │
-└─────────────────────┘
-        │
-        ▼
-┌─────────────────────┐
-│   VLM Analysis      │  ← Image + Detection result → Scene description
-│   (Scene Context)   │     e.g. "2 out of 3 workers not wearing helmets"
-└─────────────────────┘
-        │
-        ▼
-┌─────────────────────┐
-│   LLM Report        │  ← Classify violations, assess severity, suggest action
-│   Generation        │     based on SOP guidelines
-└─────────────────────┘
-        │
-        ▼
-┌─────────────────────┐
-│   Notion API        │  ← Auto-create report page in Notion DB
-│   + JSON Storage    │
-└─────────────────────┘
-        │
-        ▼
-   HTML Result Page
-```
+The system operates in a sequential 6-step process:
+
+**1. Input**
+- Image uploaded via HTML frontend
+- Image received by FastAPI backend
+
+**2. PPE Detection (YOLO)**
+- Process image through public pretrained YOLO model (PPE dataset based)
+- Output bounding boxes, classes, and confidence scores (helmet, vest, gloves, etc.)
+- Save detection result image with bounding box visualizations
+
+**3. VLM Analysis (Vision-Language Model)**
+- Combine original image and YOLO detection text results as prompt input
+- Output natural language description of the workplace situation
+- *Example: "2 out of 3 workers are not wearing helmets, 1 is close to the danger zone."*
+
+**4. LLM Report Generation**
+- Receive VLM scene description as input
+- Classify violation types (Missing PPE / Danger zone access / Abnormal behavior)
+- Determine severity (High / Medium / Low)
+- Generate actionable recommendations based on standard operating procedures (SOP)
+
+**5. Result Storage**
+- Save complete pipeline output as a JSON file (detection results + VLM output + LLM report)
+- Automatically log results to the connected Notion Database
+
+**6. HTML Result Dashboard**
+- Display the processed image with drawn bounding boxes
+- Display the VLM situation description
+- Display the final LLM report (Violations / Severity / Actions)
 
 ---
 
