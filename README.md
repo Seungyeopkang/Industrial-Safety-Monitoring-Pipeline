@@ -23,21 +23,20 @@ The pipeline is designed to mirror real-world industrial safety AI systems, with
 
 ## Pipeline Architecture
 
-The system operates in a sequential 6-step process:
+The system operates in a hybrid, resource-optimized 6-step process:
 
-**1. Input**
-- Image uploaded via HTML frontend
-- Image received by FastAPI backend
+**1. Input & Real-Time Monitoring (Detection Model)**
+- Image or video frames are fed into the system.
+- The local object detection model continuously monitors frames with minimal latency.
+- If a potential anomaly or PPE violation is suspected (e.g., a person detected without a helmet or vest), it triggers the heavier VLM/LLM cloud pipeline to save costs.
 
-**2. PPE Detection (YOLO)**
-- Process image through public pretrained YOLO model (PPE dataset based)
-- Output bounding boxes, classes, and confidence scores (helmet, vest, gloves, etc.)
-- Save detection result image with bounding box visualizations
+**2. Metadata Extraction (Detection Model)**
+- The detection model detects workers and PPE items, outputting bounding boxes, classes, and confidence scores.
+- Rather than cropping the image (which destroys surrounding context), it generates a structured text summary of the detections (e.g., `Worker 1 (helmet: ✗, vest: ✓), Worker 2 (helmet: ✓, vest: ✓)`).
 
-**3. VLM Analysis (Vision-Language Model)**
-- Combine original image and YOLO detection text results as prompt input
-- Output natural language description of the workplace situation
-- *Example: "2 out of 3 workers are not wearing helmets, 1 is close to the danger zone."*
+**3. VLM Contextual Analysis (Method 2)**
+- Send the **original image** and the **detection model-extracted text metadata** together to the Vision-Language Model (VLM).
+- VLM interprets the full scene contextually (e.g., "Worker 1 is standing close to a heavy machinery danger zone without a helmet") while avoiding small-object detection hallucinations by relying on the detection model's pre-filter.
 
 **4. LLM Report Generation**
 - Receive VLM scene description as input
@@ -58,7 +57,7 @@ The system operates in a sequential 6-step process:
 
 ## Tech Stack
 
-- **Detection:** YOLOv8 (PPE pretrained weights)
+- **Detection:** Pretrained Object Detection Model (YOLO or others)
 - **VLM:** Vision Language Model API
 - **LLM:** Large Language Model API
 - **Backend:** FastAPI
@@ -197,12 +196,45 @@ For a portfolio-scale project, Notion provides an immediately accessible, visual
 
 ## Sprints
 
-| Sprint | Goal | Duration |
+| Sprint | Goal | Key Tasks |
 |---|---|---|
-| Sprint 1 | PPE Detection pipeline | Week 1 |
-| Sprint 2 | VLM + LLM integration & prompt tuning | Week 2 |
-| Sprint 3 | FastAPI + HTML frontend | Week 3 |
-| Sprint 4 | Notion integration + full pipeline test + docs | Week 4 |
+| **Sprint 1** | **환경 세팅 및 탐지 모델 탐색** | - 개발 환경 구성 & Git 연격 저장소 연동<br>- 노션 API 연동용 로깅 스크립트 작성 및 테스트<br>- 사전 학습 객체 탐지 모델 탐색, 선정 및 로컬 가중치 다운로드 (모델 선결정)<br>- 선정된 모델 스펙에 맞춘 Roboflow/HuggingFace 테스트용 PPE 데이터셋 조사 및 다운로드<br>- 단독 탐지 모델 정밀 테스트, 임계값(Confidence) 분석 및 VLM 트리거 조건 수립 (애매한/미착용 감지 시 VLM 호출 조건 정의)<br>- OpenCV 연계 바운딩 박스 라벨 시각화 및 검증 스크립트 완성 |
+| **Sprint 2** | **VLM/LLM 프롬프트 설계** | - OpenAI/Claude/Gemini VLM API 호출 모듈 작성<br>- 탐지 모델 메타데이터(클래스, 좌표, confidence) + 원본 이미지 결합 VLM 프롬프트 설계 (방식 2)<br>- VLM 구조적 출력(Structured Outputs/JSON) 적용<br>- 안전 수칙 가이드라인(SOP) 분석 및 LLM 보고서 매핑<br>- LLM 위험도 분류 & 대응조치 프롬프트 설계 |
+| **Sprint 3** | **백엔드 및 Web UI 개발** | - FastAPI 뼈대 구축 및 의존성 주입 설계<br>- 탐지 모델 실시간 모니터링 기반 VLM 비동기 트리거링 및 전체 파이프라인 처리 API 개발<br>- 업로드 및 추론 대기 UI 개발 (Skeleton UI)<br>- 탐지 결과 이미지 & LLM 보고서 카드 UI 완성 |
+| **Sprint 4** | **Notion 연동 및 통합** | - 노션 API 결과 페이지 생성 연동<br>- 마크다운 보고서 -> 노션 블록 변환기 개발<br>- 분석 이미지 노션 임베딩/링크 구현<br>- 전체 통합 테스트 및 예외 처리 |
+| **Sprint 5** | **예외 처리 및 프롬프트 고도화** | - 객체 겹침(Occlusion) 감지 보정 로직<br>- VLM 환각(Hallucination) 방지 가드레일 설계<br>- 조도 변화 등에 따른 파이프라인 강건성 분석<br>- API 제한 초과(Rate Limit) 및 타임아웃 예외 처리 |
+| **Sprint 6** | **강건성 검증 및 포트폴리오** | - 산업 현장별(건설, 물류 등) 테스트 데이터셋 확보 (50장 이상)<br>- 파이프라인 일괄 테스트 & 벤치마크 평가<br>- 최종 보고서 작성 & 리팩토링<br>- 포트폴리오용 노션 대시보드 마감 |
+
+---
+
+### Sprint 1: 탐지 모델 & 데이터셋 비교 검증 계획
+
+#### 🔍 객체 탐지 모델 후보 (3종)
+| 모델 클래스 | 특징 |
+|---|---|
+| `keremberke/yolov8m-protective-equipment-detection` | - 클래스: helmet, no_helmet, glove, no_glove, goggles, no_goggles 등 10개<br>- 특징: 착용/미착용 분리형 라벨 구조로 가장 풍부한 메타데이터 획득 가능 |
+| `Hansung-Cho/yolov8-ppe-detection` | - 클래스: Hardhat, Safety Vest, Person<br>- 특징: 한국 건설 현장 기반 데이터셋 학습, FastAPI 연동 참고용 가이드 보유 |
+| `Tanishjain9/yolov8n-ppe-detection-6classes` | - 클래스: Helmet, Vest, Gloves, Mask, Goggles, Shoes<br>- 특징: 6개 주요 클래스 지원, 리소스가 제한적인 엣지 디바이스용 경량(Nano) 모델 |
+
+#### 📦 테스트 데이터셋 후보 (3종)
+| 데이터셋 | 이미지 수 | 특징 |
+|---|---|---|
+| `Roboflow Hard Hat Workers v10` | 7,035장 | helmet/head/person 클래스를 지원하는 정형화된 클래식 데이터셋 |
+| `Ultralytics Construction-PPE` | - | helmet, vest, gloves, boots 착용/미착용 동시 라벨링을 지원하는 2025년 최신 Find Skill.ai 데이터셋 |
+| `keremberke/protective-equipment-detection` | - | 10개 클래스를 지원하여 Hugging Face 라이브러리에서 직접 로드 및 빠른 테스트 가능 |
+
+---
+
+### ⚙️ 신뢰도 기반 하이브리드 VLM 트리거 로직
+비용 절감과 객체 식별 정확도 극대화를 위해 시스템은 다음과 같은 조건부 트리거링 로직을 수행합니다.
+
+```
+이미지 입력 ➔ 탐지 모델 (PPE 감지) ➔ [분기 처리]
+  ├─ Confidence가 충분히 높음 (예: > 0.8) ➔ 탐지 결과 자체로 확정 (VLM 호출 스킵, 비용 절감)
+  └─ Confidence가 애매하고 낮음 (예: 0.3 ~ 0.8) ➔ 원본 이미지 + 탐지 텍스트 메타데이터 결합 ➔ VLM 재판단
+                                                                     ↓
+                                                            LLM 리포트 생성
+```
 
 ---
 

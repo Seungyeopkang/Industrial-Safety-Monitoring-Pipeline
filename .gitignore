@@ -11,4 +11,6 @@ env/
 *.log
 outputs/results/
 DEVLOG_GUIDE.md
-
+detection/weights/
+*.pt
+datasets/
