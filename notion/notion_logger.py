@@ -6,7 +6,7 @@ import requests
 from dotenv import load_dotenv
 
 # .env 파일 로드
-load_dotenv()
+load_dotenv(encoding="utf-8-sig")
 
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")
 NOTION_DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
@@ -24,6 +24,8 @@ headers = {
     "Content-Type": "application/json",
     "Notion-Version": "2022-06-28"
 }
+
+MAX_BLOCKS_PER_REQUEST = 100
 
 def parse_inline_text(text):
     """
@@ -221,12 +223,24 @@ def create_dev_log(title, content_markdown, sprint=None, categories=None):
     payload = {
         "parent": {"database_id": NOTION_DATABASE_ID},
         "properties": properties,
-        "children": blocks
+        "children": blocks[:MAX_BLOCKS_PER_REQUEST]
     }
     
     response = requests.post(url, json=payload, headers=headers)
     
     if response.status_code == 200:
+        page_id = response.json()["id"]
+        for start in range(MAX_BLOCKS_PER_REQUEST, len(blocks), MAX_BLOCKS_PER_REQUEST):
+            chunk = blocks[start:start + MAX_BLOCKS_PER_REQUEST]
+            append_response = requests.patch(
+                f"https://api.notion.com/v1/blocks/{page_id}/children",
+                json={"children": chunk},
+                headers=headers,
+            )
+            if append_response.status_code != 200:
+                print(f"블록 추가 실패 (상태 코드: {append_response.status_code})")
+                print("응답 메시지:", append_response.text)
+                return False
         print(f"성공: 노션에 '{title}' 페이지를 성공적으로 생성했습니다!")
         return True
     else:

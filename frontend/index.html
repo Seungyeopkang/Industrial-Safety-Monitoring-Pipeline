@@ -9,6 +9,7 @@
   <!-- Flowbite 컴포넌트 라이브러리 (CDN) -->
   <link href="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.css" rel="stylesheet" />
   <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
   <script>
     tailwind.config = {
       darkMode: 'class',
@@ -56,7 +57,7 @@
       </div>
       <div class="flex items-center gap-4 text-xs text-slate-400">
         <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>시스템 온라인</span>
-        <span class="hidden sm:inline">Detection → VLM → RAG → LLM</span>
+        <span class="hidden sm:inline">Detection → VLM → RAG → LLM → Notion</span>
       </div>
     </div>
   </header>
@@ -117,7 +118,7 @@
   <footer class="border-t border-slate-800 mt-12">
     <div class="max-w-screen-2xl mx-auto px-8 py-4 text-xs text-slate-500 flex justify-between">
       <span>VLM-Based Industrial Safety Monitoring Pipeline</span>
-      <span>Sprint 3 · FastAPI + Web UI</span>
+      <span>Sprint 4 · Notion Report Export</span>
     </div>
   </footer>
 
@@ -126,6 +127,7 @@
     let selectedFile = null;
     let currentJobId = null;
     let pollTimer = null;
+    let screenshotUploadedForJob = null;
 
     // 파이프라인 단계 정의 (순서대로 표시)
     const STAGES = [
@@ -133,6 +135,7 @@
       { key: 'vlm', label: 'VLM 장면 분석', icon: '👁️' },
       { key: 'rag', label: 'RAG 규정 검색', icon: '📚' },
       { key: 'llm', label: 'LLM 보고서 생성', icon: '📝' },
+      { key: 'notion', label: 'Notion 보고서 저장', icon: '🗂️' },
     ];
 
     // --- DOM ---
@@ -254,6 +257,10 @@
           else if (stage === 'rag_done') updateStep('rag', 'done');
           else if (stage === 'llm') { updateStep('rag', 'done'); updateStep('llm', 'running'); }
           else if (stage === 'llm_done') updateStep('llm', 'done');
+          else if (stage === 'notion') { updateStep('llm', 'done'); updateStep('notion', 'running'); }
+          else if (stage === 'notion_done') updateStep('notion', 'done');
+          else if (stage === 'skipped_notion') updateStep('notion', 'skipped');
+          else if (stage === 'notion_failed') updateStep('notion', 'skipped');
           else if (stage === 'complete') {
             STAGES.forEach(s => updateStep(s.key, 'done'));
             clearInterval(pollTimer); pollTimer = null; loadResults();
@@ -272,6 +279,7 @@
         const res = await fetch('/results/' + currentJobId);
         const data = await res.json();
         renderResults(data);
+        queueReportScreenshotUpload(data);
       } catch (e) {
         resultDashboard.innerHTML = '<div class="bg-red-500/10 border border-red-500/40 rounded-xl p-4 text-sm text-red-300">결과 로드 실패: ' + e.message + '</div>';
       }
@@ -296,6 +304,7 @@
       const det = data.detection || {};
       const vlm = data.vlm ? data.vlm.parsed : null;
       const llm = data.llm || {};
+      const notion = data.notion || {};
 
       const summaryCard = `
         <div class="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
@@ -333,13 +342,53 @@
         <p class="text-sm text-slate-300 leading-relaxed">${vlm.overall_description || ''}</p>
         ${vlm.immediate_dangers && vlm.immediate_dangers.length ? `<p class="text-xs text-red-300 mt-3">⚠️ 즉각 위험: ${vlm.immediate_dangers.join(', ')}</p>` : ''}</div>` : '';
       const perfCard = `<div class="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4"><p class="text-xs text-slate-500">VLM: ${data.vlm ? data.vlm.latency_ms + 'ms' : '스킵'} · LLM: ${llm.latency_ms ? llm.latency_ms + 'ms' : '-'} · RAG: ${data.rag ? data.rag.retrieved_count + '건' : '-'} · 토큰: ${data.vlm ? data.vlm.prompt_tokens + '+' + data.vlm.output_tokens : '-'} / ${llm.prompt_tokens ? llm.prompt_tokens + '+' + llm.output_tokens : '-'}</p></div>`;
+      const notionCard = notion.success && notion.page_url ? `<div data-notion-card="true" class="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 flex items-center justify-between gap-3">
+        <div><p class="text-sm font-medium text-emerald-200">Notion 보고서 저장 완료</p><p class="text-xs text-emerald-300/70 mt-1">분석 결과가 Notion 데이터베이스에 자동 기록되었습니다.</p></div>
+        <a href="${notion.page_url}" target="_blank" rel="noopener noreferrer" class="flex-shrink-0 bg-emerald-600 hover:bg-emerald-700 text-white font-medium px-4 py-2 rounded-lg transition-colors text-sm">보고서 열기</a>
+      </div>` : (notion.error ? `<div class="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4"><p class="text-xs text-slate-500">Notion 저장 상태: ${notion.skipped ? '스킵' : '실패'} · ${notion.error}</p></div>` : '');
       const reloadBtn = `<button onclick="location.reload()" class="w-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium py-2.5 rounded-lg transition-colors text-sm">새 이미지 분석</button>`;
 
-      resultDashboard.innerHTML = [summaryCard, imgCard, violCard, actCard, citeCard, vlmCard, perfCard, reloadBtn].filter(Boolean).join('');
+      const reportCaptureCards = [summaryCard, violCard, actCard, citeCard, vlmCard].filter(Boolean).join('');
+      const reportCaptureArea = `<div id="reportCaptureArea" class="space-y-6">${reportCaptureCards}</div>`;
+      resultDashboard.innerHTML = [notionCard, imgCard, reportCaptureArea, perfCard, reloadBtn].filter(Boolean).join('');
       analyzeBtn.textContent = '안전 분석 시작';
       analyzeBtn.disabled = false;
+    }
+
+    function queueReportScreenshotUpload(data) {
+      if (!currentJobId || screenshotUploadedForJob === currentJobId || !window.html2canvas) return;
+      if (!data.notion || !data.notion.page_id) return;
+      screenshotUploadedForJob = currentJobId;
+      setTimeout(() => captureAndUploadReportScreenshot(currentJobId), 700);
+    }
+
+    async function captureAndUploadReportScreenshot(jobId) {
+      try {
+        const captureTarget = document.getElementById('reportCaptureArea') || resultDashboard;
+        const canvas = await html2canvas(captureTarget, {
+          backgroundColor: '#0f172a',
+          scale: Math.min(window.devicePixelRatio || 1, 2),
+          useCORS: true,
+        });
+        const imageData = canvas.toDataURL('image/png');
+        const res = await fetch('/report-screenshot/' + jobId, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_data: imageData }),
+        });
+        if (!res.ok) return;
+        const screenshot = await res.json();
+        const status = document.createElement('p');
+        status.className = 'text-xs text-slate-500 mt-2';
+        status.textContent = screenshot.notion && screenshot.notion.success
+          ? 'UI 보고서 캡처가 Notion 보고서에 추가되었습니다.'
+          : 'UI 보고서 캡처가 로컬에 저장되었습니다.';
+        const notionCard = resultDashboard.querySelector('[data-notion-card="true"]');
+        if (notionCard) notionCard.appendChild(status);
+      } catch (e) {
+        console.warn('report screenshot upload failed', e);
+      }
     }
   </script>
 </body>
 </html>
-

@@ -16,10 +16,13 @@ import time
 import json
 import uuid
 import traceback
+import base64
+from datetime import date
 from pathlib import Path
 from typing import Dict, Any, Optional
 
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
+from pydantic import BaseModel
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
 
 # 프로젝트 루트를 sys.path에 추가 (모듈 임포트용)
@@ -36,12 +39,19 @@ app = FastAPI(title="Industrial Safety Monitoring API", version="1.0.0")
 UPLOAD_DIR = PROJECT_ROOT / "outputs" / "uploads"
 RESULTS_DIR = PROJECT_ROOT / "outputs" / "results"
 ANNOTATED_DIR = PROJECT_ROOT / "outputs" / "annotated"
+REPORT_SCREENSHOT_DIR = PROJECT_ROOT / "outputs" / "report_screenshots"
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
-for d in (UPLOAD_DIR, RESULTS_DIR, ANNOTATED_DIR):
+PUBLIC_BASE_URL = os.getenv("PUBLIC_BASE_URL", "").rstrip("/")
+NOTION_AUTO_EXPORT = os.getenv("NOTION_AUTO_EXPORT", "1").lower() not in {"0", "false", "no"}
+for d in (UPLOAD_DIR, RESULTS_DIR, ANNOTATED_DIR, REPORT_SCREENSHOT_DIR):
     d.mkdir(parents=True, exist_ok=True)
 
 # 메모리 잡 상태 저장 (포트폴리오 규모. 재시작 시 리셋)
 JOBS: Dict[str, Dict[str, Any]] = {}
+
+
+class ReportScreenshotPayload(BaseModel):
+    image_data: str
 
 
 def _set_status(job_id: str, status: str, **extra):
@@ -80,7 +90,15 @@ def _run_pipeline(job_id: str, image_path: str):
             _set_status(job_id, "running", stage="skipped_vlm", message="신뢰도 높음: VLM 스킵")
             result["vlm"] = None
             result["llm"] = None
-            result["report"] = {"overall_severity": "NONE", "summary": "명백한 위반 미탐지(VLM 스킵)."}
+            result["rag"] = {"retrieved_count": 0, "clauses": []}
+            result["report"] = {
+                "date": date.today().isoformat(),
+                "violations": [],
+                "overall_severity": "NONE",
+                "recommended_actions": [],
+                "citations": [],
+                "summary": "명백한 위반 미탐지(VLM 스킵).",
+            }
         else:
             # 2) VLM 분석
             _set_status(job_id, "running", stage="vlm", message="VLM 장면 분석 중(Gemini API)")
@@ -127,7 +145,32 @@ def _run_pipeline(job_id: str, image_path: str):
             result["report"] = llm_res["parsed"].model_dump()
             _set_status(job_id, "running", stage="llm_done", message="LLM 보고서 완료")
 
-        # 5) 결과 저장
+        # 5) Notion 결과 페이지 자동 생성 (실패해도 분석 결과는 유지)
+        if result.get("report") and NOTION_AUTO_EXPORT:
+            _set_status(job_id, "running", stage="notion", message="Notion 안전 보고서 저장 중")
+            try:
+                from notion.report_to_notion import create_safety_report_page
+                image_url = f"{PUBLIC_BASE_URL}/annotated/{job_id}" if PUBLIC_BASE_URL else None
+                result["notion"] = create_safety_report_page(
+                    job_id,
+                    result,
+                    image_url=image_url,
+                    image_path=str(image_path),
+                )
+                if result["notion"].get("success"):
+                    _set_status(job_id, "running", stage="notion_done", message="Notion 보고서 저장 완료")
+                elif result["notion"].get("skipped"):
+                    _set_status(job_id, "running", stage="skipped_notion", message="Notion 설정 없음: 저장 스킵")
+                else:
+                    _set_status(job_id, "running", stage="notion_failed", message="Notion 저장 실패(결과 JSON에는 기록)")
+            except Exception as notion_exc:
+                result["notion"] = {"success": False, "error": f"{type(notion_exc).__name__}: {notion_exc}"}
+                _set_status(job_id, "running", stage="notion_failed", message="Notion 저장 실패(결과 JSON에는 기록)")
+        else:
+            result["notion"] = {"success": False, "skipped": True, "error": "NOTION_AUTO_EXPORT 비활성화 또는 report 없음"}
+            _set_status(job_id, "running", stage="skipped_notion", message="Notion 저장 스킵")
+
+        # 6) 결과 저장
         result_path = RESULTS_DIR / f"{job_id}.json"
         result_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
         _set_status(job_id, "done", stage="complete", message="파이프라인 완료",
@@ -204,7 +247,54 @@ async def annotated(job_id: str):
     return FileResponse(str(annotated_path), media_type="image/jpeg")
 
 
+@app.get("/report-screenshots/{job_id}")
+async def report_screenshot(job_id: str):
+    """UI 결과 대시보드 캡처 이미지 서빙."""
+    screenshot_path = REPORT_SCREENSHOT_DIR / f"{job_id}_report.png"
+    if not screenshot_path.exists():
+        raise HTTPException(status_code=404, detail="보고서 캡처 이미지를 찾을 수 없습니다.")
+    return FileResponse(str(screenshot_path), media_type="image/png")
+
+
+@app.post("/report-screenshot/{job_id}")
+async def upload_report_screenshot(job_id: str, payload: ReportScreenshotPayload):
+    """프론트엔드에서 렌더링된 결과 대시보드 캡처를 저장하고 Notion 보고서에 첨부."""
+    result_path = RESULTS_DIR / f"{job_id}.json"
+    if not result_path.exists():
+        raise HTTPException(status_code=404, detail="결과를 찾을 수 없습니다.")
+
+    prefix = "data:image/png;base64,"
+    image_data = payload.image_data
+    if image_data.startswith(prefix):
+        image_data = image_data[len(prefix):]
+    try:
+        image_bytes = base64.b64decode(image_data, validate=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"캡처 이미지 디코딩 실패: {exc}")
+
+    screenshot_path = REPORT_SCREENSHOT_DIR / f"{job_id}_report.png"
+    screenshot_path.write_bytes(image_bytes)
+
+    result = json.loads(result_path.read_text(encoding="utf-8"))
+    screenshot_url = f"{PUBLIC_BASE_URL}/report-screenshots/{job_id}" if PUBLIC_BASE_URL else None
+    notion_result = {"success": False, "skipped": True, "error": "Notion page_id 없음"}
+    page_id = (result.get("notion") or {}).get("page_id")
+    if page_id:
+        try:
+            from notion.report_to_notion import append_report_screenshot
+            notion_result = append_report_screenshot(page_id, screenshot_url, str(screenshot_path))
+        except Exception as exc:
+            notion_result = {"success": False, "error": f"{type(exc).__name__}: {exc}"}
+
+    result["ui_report_screenshot"] = {
+        "local_path": str(screenshot_path),
+        "url": screenshot_url,
+        "notion": notion_result,
+    }
+    result_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
+    return result["ui_report_screenshot"]
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("api.main:app", host="0.0.0.0", port=8000, reload=False)
-

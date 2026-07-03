@@ -14,3 +14,7 @@ DEVLOG_GUIDE.md
 detection/weights/
 *.pt
 datasets/
+outputs/uploads/
+outputs/annotated/
+outputs/*.err
+outputs/*.out

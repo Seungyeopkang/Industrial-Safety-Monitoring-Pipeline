@@ -6,7 +6,7 @@ from collections import defaultdict
 
 # 환경변수 로드 (프로젝트 루트 기준, 하드코딩된 절대경로 제거)
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"), encoding="utf-8-sig")
 
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")
 NOTION_PAGE_ID = os.getenv("NOTION_PAGE_ID")
