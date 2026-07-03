@@ -1,0 +1,22 @@
+Loading weights:   0%|          | 0/391 [00:00<?, ?it/s]Loading weights: 100%|██████████| 391/391 [00:00<00:00, 32452.22it/s]
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "C:\Users\user\Desktop\Industrial_Safety_Monitoring_Pipeline\rag\build_index.py", line 75, in <module>
+    n = build(rebuild=args.rebuild)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\Desktop\Industrial_Safety_Monitoring_Pipeline\rag\build_index.py", line 60, in build
+    collection.add(
+  File "C:\Users\user\anaconda3\Lib\site-packages\chromadb\api\models\Collection.py", line 109, in add
+    add_request = self._validate_and_prepare_add_request(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\anaconda3\Lib\site-packages\chromadb\api\models\CollectionCommon.py", line 103, in wrapper
+    return func(self, *args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\user\anaconda3\Lib\site-packages\chromadb\api\models\CollectionCommon.py", line 235, in _validate_and_prepare_add_request
+    validate_insert_record_set(record_set=add_records)
+  File "C:\Users\user\anaconda3\Lib\site-packages\chromadb\api\types.py", line 445, in validate_insert_record_set
+    validate_ids(record_set["ids"])
+  File "C:\Users\user\anaconda3\Lib\site-packages\chromadb\api\types.py", line 1039, in validate_ids
+    raise errors.DuplicateIDError(message)
+chromadb.errors.DuplicateIDError: Expected IDs to be unique, found 10 duplicated IDs: 1d935de0491c, 9757dd39eae0, 49fcc6b58228, 6bd77e0d7542, 6135d00aa2dd, ..., 68281ea06605, 38b02e939616, 850f763c7b9e, 0706d1184f84, f58c4ed5e828 in add.

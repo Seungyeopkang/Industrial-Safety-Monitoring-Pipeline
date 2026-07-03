@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="ko" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>산업 안전 모니터링 | Safety Monitor</title>
+  <!-- Tailwind CSS (CDN, 빌드 없이 단일 HTML) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Flowbite 컴포넌트 라이브러리 (CDN) -->
+  <link href="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/flowbite@2.5.2/dist/flowbite.min.js"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            // 산업용 디자인: 슬레이트/그래파이트 + 안전 오렌지/레드 액센트
+            safety: {
+              50: '#fff7ed', 100: '#ffedd5', 200: '#fed7aa', 300: '#fdba74',
+              400: '#fb923c', 500: '#f97316', 600: '#ea580c', 700: '#c2410c',
+              800: '#9a3412', 900: '#7c2d12',
+            },
+          },
+          fontFamily: {
+            sans: ['Inter', 'system-ui', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    /* 스크롤바 스타일 (산업용 다크) */
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-track { background: #1e293b; }
+    ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+
+  <!-- 헤더 (산업용 콘솔 느낌) -->
+  <header class="border-b border-slate-800 bg-slate-950/80 backdrop-blur sticky top-0 z-50">
+    <div class="max-w-screen-2xl mx-auto px-8 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-lg bg-safety-500/20 border border-safety-500/40 flex items-center justify-center">
+          <svg class="w-6 h-6 text-safety-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.062-.18-2.087-.514-3.044z"/></svg>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold tracking-tight">산업 안전 모니터링</h1>
+          <p class="text-xs text-slate-400">Industrial Safety Monitoring Pipeline</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-4 text-xs text-slate-400">
+        <span class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>시스템 온라인</span>
+        <span class="hidden sm:inline">Detection → VLM → RAG → LLM</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-screen-2xl mx-auto px-8 py-10">
+    <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+      <!-- 좌측: 업로드 + 진행 상황 (1/4) -->
+      <section class="lg:col-span-1 space-y-6">
+        <!-- 업로드 카드 -->
+        <div class="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
+          <h2 class="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
+            <svg class="w-4 h-4 text-safety-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
+            이미지 업로드
+          </h2>
+          <!-- 드래그앤드롭 영역 -->
+          <div id="dropzone" class="border-2 border-dashed border-slate-600 rounded-lg p-8 text-center cursor-pointer hover:border-safety-500 hover:bg-safety-500/5 transition-colors group">
+            <svg class="w-10 h-10 mx-auto mb-3 text-slate-500 group-hover:text-safety-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
+            <p class="text-sm text-slate-300 mb-1">이미지를 드래그하거나 <span class="text-safety-500 font-medium">클릭하여 선택</span></p>
+            <p class="text-xs text-slate-500">JPG, PNG, WEBP (최대 10MB)</p>
+            <input id="fileInput" type="file" accept="image/*" class="hidden" />
+          </div>
+          <!-- 미리보기 (업로드 후) -->
+          <div id="preview" class="hidden mt-4">
+            <img id="previewImg" class="w-full rounded-lg border border-slate-700" alt="미리보기" />
+            <p id="previewName" class="text-xs text-slate-400 mt-2 truncate"></p>
+          </div>
+          <!-- 분석 버튼 -->
+          <button id="analyzeBtn" disabled class="hidden w-full mt-4 bg-safety-600 hover:bg-safety-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium py-2.5 rounded-lg transition-colors text-sm">
+            안전 분석 시작
+          </button>
+        </div>
+
+        <!-- 파이프라인 진행 상황 (분석 중 표시) -->
+        <div id="progressCard" class="hidden bg-slate-800/50 border border-slate-700 rounded-xl p-5">
+          <h2 class="text-sm font-semibold text-slate-300 mb-4">파이프라인 진행</h2>
+          <div id="progressSteps" class="space-y-3">
+            <!-- 단계별 스켈레톤/상태가 동적 삽입 -->
+          </div>
+          <p id="progressMessage" class="text-xs text-slate-400 mt-3"></p>
+        </div>
+      </section>
+
+      <!-- 우측: 결과 대시보드 (3/4) -->
+      <section class="lg:col-span-3">
+        <div id="resultDashboard" class="hidden space-y-6">
+          <!-- 결과가 동적 삽입 -->
+        </div>
+        <!-- 빈 상태 (초기) -->
+        <div id="emptyState" class="bg-slate-800/30 border border-slate-700/50 rounded-xl p-12 text-center">
+          <svg class="w-16 h-16 mx-auto mb-4 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          <h3 class="text-slate-300 font-medium mb-1">결과 대시보드</h3>
+          <p class="text-sm text-slate-500">이미지를 업로드하고 안전 분석을 시작하면 결과가 여기에 표시됩니다.</p>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer class="border-t border-slate-800 mt-12">
+    <div class="max-w-screen-2xl mx-auto px-8 py-4 text-xs text-slate-500 flex justify-between">
+      <span>VLM-Based Industrial Safety Monitoring Pipeline</span>
+      <span>Sprint 3 · FastAPI + Web UI</span>
+    </div>
+  </footer>
+
+  <script>
+    // --- 상태 ---
+    let selectedFile = null;
+    let currentJobId = null;
+    let pollTimer = null;
+
+    // 파이프라인 단계 정의 (순서대로 표시)
+    const STAGES = [
+      { key: 'detection', label: 'YOLO 객체 탐지', icon: '🔍' },
+      { key: 'vlm', label: 'VLM 장면 분석', icon: '👁️' },
+      { key: 'rag', label: 'RAG 규정 검색', icon: '📚' },
+      { key: 'llm', label: 'LLM 보고서 생성', icon: '📝' },
+    ];
+
+    // --- DOM ---
+    const dropzone = document.getElementById('dropzone');
+    const fileInput = document.getElementById('fileInput');
+    const preview = document.getElementById('preview');
+    const previewImg = document.getElementById('previewImg');
+    const previewName = document.getElementById('previewName');
+    const analyzeBtn = document.getElementById('analyzeBtn');
+    const progressCard = document.getElementById('progressCard');
+    const progressSteps = document.getElementById('progressSteps');
+    const progressMessage = document.getElementById('progressMessage');
+    const resultDashboard = document.getElementById('resultDashboard');
+    const emptyState = document.getElementById('emptyState');
+
+    // --- 파일 선택 처리 ---
+    dropzone.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', (e) => { if (e.target.files[0]) handleFile(e.target.files[0]); });
+    dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.classList.add('border-safety-500', 'bg-safety-500/5'); });
+    dropzone.addEventListener('dragleave', () => { dropzone.classList.remove('border-safety-500', 'bg-safety-500/5'); });
+    dropzone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('border-safety-500', 'bg-safety-500/5');
+      if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+    });
+
+    function handleFile(file) {
+      if (!file.type.startsWith('image/')) { alert('이미지 파일만 업로드 가능합니다.'); return; }
+      if (file.size > 10 * 1024 * 1024) { alert('파일 크기는 10MB 이하여야 합니다.'); return; }
+      selectedFile = file;
+      previewImg.src = URL.createObjectURL(file);
+      previewName.textContent = file.name;
+      preview.classList.remove('hidden');
+      analyzeBtn.classList.remove('hidden');
+      analyzeBtn.disabled = false;
+    }
+
+    // --- 분석 시작 ---
+    analyzeBtn.addEventListener('click', async () => {
+      if (!selectedFile) return;
+      analyzeBtn.disabled = true;
+      analyzeBtn.textContent = '업로드 중...';
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      try {
+        const res = await fetch('/upload', { method: 'POST', body: formData });
+        if (!res.ok) throw new Error('업로드 실패: ' + res.status);
+        const data = await res.json();
+        currentJobId = data.job_id;
+        showProgress();
+        startPolling();
+      } catch (err) {
+        alert('업로드 실패: ' + err.message);
+        analyzeBtn.disabled = false;
+        analyzeBtn.textContent = '안전 분석 시작';
+      }
+    });
+
+    // --- 진행 상황 표시 (스켈레톤 + 단계) ---
+    function showProgress() {
+      emptyState.classList.add('hidden');
+      resultDashboard.classList.add('hidden');
+      progressCard.classList.remove('hidden');
+      progressSteps.innerHTML = STAGES.map(s => `
+        <div id="step-${s.key}" class="flex items-center gap-3">
+          <div class="step-circle w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-sm">
+            <span class="skeleton-icon">${s.icon}</span>
+            <svg class="hidden skeleton-spinner animate-spin w-4 h-4 text-safety-500" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"/></svg>
+          </div>
+          <div class="flex-1">
+            <p class="text-sm text-slate-300">${s.label}</p>
+          </div>
+          <span class="step-status text-xs text-slate-500">대기</span>
+        </div>
+      `).join('');
+    }
+
+    function updateStep(key, state) {
+      const step = document.getElementById('step-' + key);
+      if (!step) return;
+      const circle = step.querySelector('.step-circle');
+      const spinner = step.querySelector('.skeleton-spinner');
+      const icon = step.querySelector('.skeleton-icon');
+      const status = step.querySelector('.step-status');
+      if (state === 'running') {
+        icon.classList.add('hidden'); spinner.classList.remove('hidden');
+        circle.classList.remove('bg-slate-700', 'bg-emerald-500/20', 'border-emerald-500/40');
+        circle.classList.add('bg-safety-500/20', 'border', 'border-safety-500/40');
+        status.textContent = '진행 중'; status.className = 'step-status text-xs text-safety-400';
+      } else if (state === 'done') {
+        icon.classList.remove('hidden'); spinner.classList.add('hidden');
+        icon.textContent = '✓';
+        circle.classList.remove('bg-slate-700', 'bg-safety-500/20', 'border-safety-500/40');
+        circle.classList.add('bg-emerald-500/20', 'border', 'border-emerald-500/40');
+        status.textContent = '완료'; status.className = 'step-status text-xs text-emerald-400';
+      } else if (state === 'skipped') {
+        icon.classList.remove('hidden'); spinner.classList.add('hidden');
+        icon.textContent = '−'; circle.classList.add('bg-slate-700');
+        status.textContent = '스킵'; status.className = 'step-status text-xs text-slate-500';
+      }
+    }
+
+    // --- 폴링 ---
+    function startPolling() {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        if (!currentJobId) return;
+        try {
+          const res = await fetch('/status/' + currentJobId);
+          const data = await res.json();
+          progressMessage.textContent = data.message || '';
+          const stage = data.stage;
+          if (stage === 'detection') updateStep('detection', 'running');
+          else if (stage === 'detection_done') updateStep('detection', 'done');
+          else if (stage === 'skipped_vlm') { updateStep('vlm', 'skipped'); updateStep('rag', 'skipped'); updateStep('llm', 'skipped'); }
+          else if (stage === 'vlm') { updateStep('detection', 'done'); updateStep('vlm', 'running'); }
+          else if (stage === 'vlm_done') updateStep('vlm', 'done');
+          else if (stage === 'rag') { updateStep('vlm', 'done'); updateStep('rag', 'running'); }
+          else if (stage === 'rag_done') updateStep('rag', 'done');
+          else if (stage === 'llm') { updateStep('rag', 'done'); updateStep('llm', 'running'); }
+          else if (stage === 'llm_done') updateStep('llm', 'done');
+          else if (stage === 'complete') {
+            STAGES.forEach(s => updateStep(s.key, 'done'));
+            clearInterval(pollTimer); pollTimer = null; loadResults();
+          } else if (data.status === 'failed') {
+            clearInterval(pollTimer); pollTimer = null;
+            progressMessage.textContent = '실패: ' + (data.message || '오류');
+            progressMessage.className = 'text-xs text-red-400 mt-3';
+          }
+        } catch (e) { /* 폴링 일시 오류 무시 */ }
+      }, 1500);
+    }
+
+    // --- 결과 로드 및 렌더링 ---
+    async function loadResults() {
+      try {
+        const res = await fetch('/results/' + currentJobId);
+        const data = await res.json();
+        renderResults(data);
+      } catch (e) {
+        resultDashboard.innerHTML = '<div class="bg-red-500/10 border border-red-500/40 rounded-xl p-4 text-sm text-red-300">결과 로드 실패: ' + e.message + '</div>';
+      }
+    }
+
+    function severityBadge(sev) {
+      const map = { HIGH: 'bg-red-500/20 text-red-300 border-red-500/40', MEDIUM: 'bg-amber-500/20 text-amber-300 border-amber-500/40', LOW: 'bg-yellow-500/20 text-yellow-300 border-yellow-500/40', NONE: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' };
+      return `<span class="px-2.5 py-0.5 rounded-full text-xs font-medium border ${map[sev] || map.NONE}">${sev || 'NONE'}</span>`;
+    }
+    function violationTypeLabel(t) { return { missing_ppe: 'PPE 미착용', danger_zone_access: '위험구역 출입', abnormal_behavior: '이상 행동', equipment_misuse: '장비 오용', none: '이상 없음' }[t] || t; }
+    function priorityLabel(p) { return { immediate: '즉시', high: '높음', medium: '보통', low: '낮음' }[p] || p; }
+    function priorityColor(p) { return { immediate: 'bg-red-500/20 text-red-300', high: 'bg-amber-500/20 text-amber-300', medium: 'bg-yellow-500/20 text-yellow-300', low: 'bg-slate-500/20 text-slate-300' }[p] || 'bg-slate-500/20 text-slate-300'; }
+
+    function renderResults(data) {
+      progressCard.classList.add('hidden');
+      emptyState.classList.add('hidden');
+      resultDashboard.classList.remove('hidden');
+      const report = data.report || {};
+      const violations = report.violations || [];
+      const actions = report.recommended_actions || [];
+      const citations = report.citations || [];
+      const det = data.detection || {};
+      const vlm = data.vlm ? data.vlm.parsed : null;
+      const llm = data.llm || {};
+
+      const summaryCard = `
+        <div class="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
+          <div class="flex items-center justify-between mb-3">
+            <h2 class="text-sm font-semibold text-slate-300">검사 결과 요약</h2>${severityBadge(report.overall_severity)}
+          </div>
+          <p class="text-sm text-slate-300 leading-relaxed">${report.summary || '요약 없음'}</p>
+          <div class="grid grid-cols-3 gap-3 mt-4">
+            <div class="bg-slate-900/50 rounded-lg p-3 text-center"><p class="text-2xl font-bold text-slate-100">${violations.length}</p><p class="text-xs text-slate-400 mt-1">탐지된 위반</p></div>
+            <div class="bg-slate-900/50 rounded-lg p-3 text-center"><p class="text-2xl font-bold text-slate-100">${actions.length}</p><p class="text-xs text-slate-400 mt-1">권고 조치</p></div>
+            <div class="bg-slate-900/50 rounded-lg p-3 text-center"><p class="text-2xl font-bold text-slate-100">${citations.length}</p><p class="text-xs text-slate-400 mt-1">법령 인용</p></div>
+          </div>
+        </div>`;
+      const imgCard = `
+        <div class="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
+          <h2 class="text-sm font-semibold text-slate-300 mb-3">탐지 결과 시각화</h2>
+          <img src="/annotated/${currentJobId}" class="w-full rounded-lg border border-slate-700" alt="탐지 결과" />
+          <p class="text-xs text-slate-400 mt-2">YOLO 모델: ${det.model || '-'} · 탐지 객체: ${(det.detections || []).length}개</p>
+        </div>`;
+      const violCard = violations.length ? `<div class="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
+        <h2 class="text-sm font-semibold text-slate-300 mb-3">탐지된 위반 (${violations.length})</h2>
+        <div class="space-y-2">${violations.map(v => `<div class="bg-slate-900/40 border border-slate-700/50 rounded-lg p-3 flex items-start gap-3">
+          <div class="flex-shrink-0">${severityBadge(v.severity)}</div>
+          <div class="flex-1"><p class="text-sm text-slate-200 font-medium">${v.worker_id} · ${violationTypeLabel(v.violation_type)}</p><p class="text-xs text-slate-400 mt-1">${v.description || ''}</p></div></div>`).join('')}</div></div>` : '';
+      const actCard = actions.length ? `<div class="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
+        <h2 class="text-sm font-semibold text-slate-300 mb-3">권고 조치 (${actions.length})</h2>
+        <div class="space-y-2">${actions.map(a => `<div class="bg-slate-900/40 border border-slate-700/50 rounded-lg p-3 flex items-start gap-3">
+          <span class="px-2 py-0.5 rounded text-xs font-medium ${priorityColor(a.priority)}">${priorityLabel(a.priority)}</span>
+          <div class="flex-1"><p class="text-sm text-slate-200">${a.action}</p><p class="text-xs text-slate-500 mt-1">대상: ${a.target}</p></div></div>`).join('')}</div></div>` : '';
+      const citeCard = citations.length ? `<div class="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
+        <h2 class="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">법령 인용 (RAG 기반)<span class="text-xs text-slate-500 font-normal">· 환각 방지: 검색된 조항만 인용</span></h2>
+        <div class="space-y-2">${citations.map(c => `<div class="bg-slate-900/40 border-l-2 border-safety-500 rounded-r-lg p-3"><p class="text-sm text-safety-300 font-medium">${c.source} · ${c.clause}</p><p class="text-xs text-slate-400 mt-1 italic">"${c.quote}"</p></div>`).join('')}</div></div>` : '';
+      const vlmCard = vlm ? `<div class="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
+        <h2 class="text-sm font-semibold text-slate-300 mb-3">VLM 장면 분석</h2>
+        <p class="text-sm text-slate-300 leading-relaxed">${vlm.overall_description || ''}</p>
+        ${vlm.immediate_dangers && vlm.immediate_dangers.length ? `<p class="text-xs text-red-300 mt-3">⚠️ 즉각 위험: ${vlm.immediate_dangers.join(', ')}</p>` : ''}</div>` : '';
+      const perfCard = `<div class="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4"><p class="text-xs text-slate-500">VLM: ${data.vlm ? data.vlm.latency_ms + 'ms' : '스킵'} · LLM: ${llm.latency_ms ? llm.latency_ms + 'ms' : '-'} · RAG: ${data.rag ? data.rag.retrieved_count + '건' : '-'} · 토큰: ${data.vlm ? data.vlm.prompt_tokens + '+' + data.vlm.output_tokens : '-'} / ${llm.prompt_tokens ? llm.prompt_tokens + '+' + llm.output_tokens : '-'}</p></div>`;
+      const reloadBtn = `<button onclick="location.reload()" class="w-full bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium py-2.5 rounded-lg transition-colors text-sm">새 이미지 분석</button>`;
+
+      resultDashboard.innerHTML = [summaryCard, imgCard, violCard, actCard, citeCard, vlmCard, perfCard, reloadBtn].filter(Boolean).join('');
+      analyzeBtn.textContent = '안전 분석 시작';
+      analyzeBtn.disabled = false;
+    }
+  </script>
+</body>
+</html>
+

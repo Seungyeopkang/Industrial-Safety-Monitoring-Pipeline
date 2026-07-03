@@ -41,7 +41,8 @@ The system operates in a hybrid, resource-optimized 6-step process:
 - Receive VLM scene description as input.
 - Classify violation types (Missing PPE / Danger zone access / Abnormal behavior) and determine severity (High / Medium / Low).
 - Enforce strict JSON output format using **Pydantic schemas** (Structured Outputs) to guarantee schema compliance.
-- Generate actionable recommendations based on standard operating procedures (SOP).
+- Generate actionable recommendations based on standard operating procedures (SOP) **retrieved via RAG**.
+- SOP documents (Korean safety regulations: 산업안전보건법·산업안전보건기준에 관한 규칙·KOSHA 안전보건가이드) are chunked, embedded, and stored in a local vector DB (Chroma). Relevant clauses are retrieved per violation and cited with actual section references, preventing hallucinated citations.
 
 **5. Result Storage**
 - Save complete pipeline output as a JSON file (detection results + VLM output + LLM report).
@@ -61,6 +62,7 @@ The system operates in a hybrid, resource-optimized 6-step process:
 - **LLM:** Large Language Model API
 - **Backend:** FastAPI
 - **Frontend:** HTML (single page)
+- **RAG:** Local vector DB (Chroma) + bge-m3 (Korean-multilingual embedding) for Korean safety regulation (산업안전보건법·산안규·KOSHA) clause retrieval and citation
 - **Storage:** Notion API + JSON
 - **Language:** Python 3.10+
 
@@ -71,18 +73,24 @@ The system operates in a hybrid, resource-optimized 6-step process:
 ```
 vlm-safety-monitor/
 ├── detection/
-│   ├── detector.py          # YOLO inference & bounding box drawing
+│   ├── detector.py            # YOLO inference, OpenCV viz, VLM trigger logic
+│   ├── vlm_trigger_rules.md   # Confidence-based VLM trigger spec
 │   ├── experiments/         # Model benchmarking & evaluations
 │   │   ├── benchmark.py
 │   │   ├── evaluate.py
 │   │   └── generate_report.py
 │   └── weights/             # Pretrained YOLO weights (PPE)
 ├── vlm/
-│   └── analyzer.py          # VLM API call & scene description
+│   ├── analyzer.py            # VLM scene analysis (Method 2: image + detection metadata)
+│   └── schema.py              # VLMSceneAnalysis Pydantic schema
 ├── llm/
-│   └── reporter.py          # LLM API call & report generation
+│   ├── reporter.py            # LLM safety report generation (Structured Outputs)
+│   └── schema.py              # SafetyReport Pydantic schema (with SOP citations)
+├── experiments/
+│   ├── prompt_optimization.py # VLM/LLM prompt variant comparison
+│   └── visualize_prompt_opt.py# Results visualization
 ├── notion/
-│   ├── uploader.py          # Notion API integration
+│   ├── notion_logger.py       # Notion API integration
 │   ├── create_devlog.py     # Programmatic devlog creation
 │   ├── update_progress.py   # Notion progress synchronization
 │   └── archive/             # Archived/one-off utility scripts
@@ -95,7 +103,6 @@ vlm-safety-monitor/
 ├── assets/
 │   └── sample_images/       # Test images
 ├── requirements.txt
-│   └── (To be added)
 └── README.md
 ```
 
@@ -127,6 +134,9 @@ VLM_API_KEY=your_vlm_api_key
 LLM_API_KEY=your_llm_api_key
 NOTION_API_KEY=your_notion_api_key
 NOTION_DATABASE_ID=your_notion_database_id
+NOTION_PAGE_ID=your_notion_page_id
+NOTION_SPRINT_DB_ID=your_notion_sprint_db_id
+NOTION_PREVIOUS_PAGE_ID=your_notion_previous_page_id
 ```
 
 ### 4. Run the server
@@ -198,6 +208,9 @@ Raw VLM output is descriptive but unstructured. A dedicated LLM step refines thi
 
 **Why Notion over a database?**
 For a portfolio-scale project, Notion provides an immediately accessible, visually rich storage layer without requiring infrastructure setup, while demonstrating API integration skills.
+
+**Why RAG for SOP retrieval?**
+Hardcoding SOP text in prompts risks fabricated citations (e.g., referencing non-existent sections). Retrieving relevant clauses from a local vector DB built on Korean safety regulations (산업안전보건법·산업안전보건기준에 관한 규칙·KOSHA 안전보건가이드) ensures every recommendation cites a real section, while naturally mitigating LLM hallucination - the LLM is constrained to cite only clauses present in the retrieved RAG context. A multilingual embedding model (bge-m3) is used so Korean-language queries retrieve Korean regulation clauses with high semantic accuracy.
 
 ---
 

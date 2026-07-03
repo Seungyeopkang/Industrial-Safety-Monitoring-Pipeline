@@ -1,16 +1,27 @@
 import os
+import sys
 import requests
 from dotenv import load_dotenv
 from collections import defaultdict
 
-# 환경변수 로드
-env_path = r"c:\Users\user\Desktop\VLM-Based Industrial Safety Monitoring Pipeline\.env"
-load_dotenv(dotenv_path=env_path)
+# 환경변수 로드 (프로젝트 루트 기준, 하드코딩된 절대경로 제거)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")
 NOTION_PAGE_ID = os.getenv("NOTION_PAGE_ID")
-# Sprint 계획 데이터베이스 ID (하드코딩 혹은 환경변수)
-SPRINT_DB_ID = "38e73d49-32e0-812e-8adf-e6d1b67876c4" 
+# Sprint 계획 데이터베이스 ID (환경변수에서 로드)
+SPRINT_DB_ID = os.getenv("NOTION_SPRINT_DB_ID")
+
+if not NOTION_API_KEY or NOTION_API_KEY == "your_notion_api_key":
+    print("Error: NOTION_API_KEY가 .env 파일에 올바르게 설정되지 않았습니다.")
+    sys.exit(1)
+if not NOTION_PAGE_ID or NOTION_PAGE_ID == "your_notion_page_id":
+    print("Error: NOTION_PAGE_ID가 .env 파일에 올바르게 설정되지 않았습니다.")
+    sys.exit(1)
+if not SPRINT_DB_ID:
+    print("Error: NOTION_SPRINT_DB_ID가 .env 파일에 설정되지 않았습니다.")
+    sys.exit(1)
 
 headers = {
     "Authorization": f"Bearer {NOTION_API_KEY}",

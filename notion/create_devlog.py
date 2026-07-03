@@ -1,15 +1,31 @@
 import os
 import shutil
 import subprocess
+import sys
 import requests
 from dotenv import load_dotenv
 
-env_path = r"c:\Users\user\Desktop\VLM-Based Industrial Safety Monitoring Pipeline\.env"
-load_dotenv(dotenv_path=env_path)
+# 프로젝트 루트 기준 경로 (하드코딩된 절대경로 제거)
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 NOTION_API_KEY = os.getenv("NOTION_API_KEY")
-DATABASE_ID = "38d73d49-32e0-81c2-b71a-e4c967437e17"
-PREVIOUS_PAGE_ID = "38f73d49-32e0-818c-a169-c397345b1439"
+DATABASE_ID = os.getenv("NOTION_DATABASE_ID")
+PREVIOUS_PAGE_ID = os.getenv("NOTION_PREVIOUS_PAGE_ID")
+IMAGE_URL = os.getenv(
+    "GITHUB_RAW_IMAGE_URL",
+    "https://raw.githubusercontent.com/Seungyeopkang/VLM-Based-Industrial-Safety-Monitoring-Pipeline/main/notion/assets/evaluation_comparison.png",
+)
+
+if not NOTION_API_KEY or NOTION_API_KEY == "your_notion_api_key":
+    print("Error: NOTION_API_KEY가 .env 파일에 올바르게 설정되지 않았습니다.")
+    sys.exit(1)
+if not DATABASE_ID or DATABASE_ID == "your_notion_database_id":
+    print("Error: NOTION_DATABASE_ID가 .env 파일에 올바르게 설정되지 않았습니다.")
+    sys.exit(1)
+if not PREVIOUS_PAGE_ID:
+    print("Error: NOTION_PREVIOUS_PAGE_ID가 .env 파일에 설정되지 않았습니다.")
+    sys.exit(1)
 
 headers = {
     "Authorization": f"Bearer {NOTION_API_KEY}",
@@ -18,10 +34,10 @@ headers = {
 }
 
 def copy_and_push_image():
-    assets_dir = r"c:\Users\user\Desktop\VLM-Based Industrial Safety Monitoring Pipeline\notion\assets"
+    assets_dir = os.path.join(PROJECT_ROOT, "notion", "assets")
     os.makedirs(assets_dir, exist_ok=True)
     
-    src = r"c:\Users\user\Desktop\VLM-Based Industrial Safety Monitoring Pipeline\outputs\results\evaluation_comparison.png"
+    src = os.path.join(PROJECT_ROOT, "outputs", "results", "evaluation_comparison.png")
     dst = os.path.join(assets_dir, "evaluation_comparison.png")
     
     shutil.copy(src, dst)
@@ -76,8 +92,8 @@ def make_table_block(headers_list, rows_list):
     }
 
 def create_detailed_devlog():
-    # Raw GitHub url of the pushed image
-    image_url = "https://raw.githubusercontent.com/Seungyeopkang/VLM-Based-Industrial-Safety-Monitoring-Pipeline/main/notion/assets/evaluation_comparison.png"
+    # Raw GitHub url of the pushed image (GITHUB_RAW_IMAGE_URL 환경변수로 오버라이드 가능)
+    image_url = IMAGE_URL
     
     url = "https://api.notion.com/v1/pages"
     
