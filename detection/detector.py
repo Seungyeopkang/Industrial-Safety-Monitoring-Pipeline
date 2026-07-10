@@ -8,6 +8,7 @@ Implements confidence-based VLM trigger rules (see vlm_trigger_rules.md).
 import os
 import cv2
 import json
+from functools import lru_cache
 from pathlib import Path
 from ultralytics import YOLO
 
@@ -102,11 +103,20 @@ def draw_detections(image, detections):
     return image
 
 
-def run_detection(image_path, weight_path=None, save_dir=None):
-    if weight_path is None:
-        weight_path = DEFAULT_WEIGHT
-    model = YOLO(str(weight_path))
-    results = model(image_path, conf=CONF_THRESHOLD, verbose=False)
+@lru_cache(maxsize=2)
+def _load_cached_model(weight_path: str):
+    """Keep one model instance per weight file for the lifetime of the process."""
+    return YOLO(weight_path)
+
+
+def load_model(weight_path=None):
+    """Return a process-cached PPE detector; video and API jobs reuse it."""
+    return _load_cached_model(str(Path(weight_path or DEFAULT_WEIGHT).resolve()))
+
+
+def run_detection_frame(image, model):
+    """Run detection on one already-decoded OpenCV frame."""
+    results = model(image, conf=CONF_THRESHOLD, verbose=False)
     r = results[0]
     detections = []
     for box in r.boxes:
@@ -118,12 +128,18 @@ def run_detection(image_path, weight_path=None, save_dir=None):
     trigger_info = determine_vlm_trigger(detections)
     annotated = draw_detections(r.orig_img.copy(), detections)
     output = {
-        'image_path': str(image_path),
-        'model': Path(weight_path).name,
+        'model': Path(getattr(model, 'ckpt_path', DEFAULT_WEIGHT)).name,
         'detections': trigger_info,
         'summary': _build_summary(trigger_info),
     }
-    if save_dir:
+    return output, annotated
+
+
+def run_detection(image_path, weight_path=None, save_dir=None):
+    model = load_model(weight_path)
+    output, annotated = run_detection_frame(image_path, model)
+    output['image_path'] = str(image_path)
+    if save_dir: #단독 실행시만 됨. api로 호출시에는 다음 rag나 vlm에 전달하고, job status도 관리해야해서 따로 진행
         save_dir = Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
         stem = Path(image_path).stem

@@ -11,6 +11,7 @@ clauses (Sprint 2 follow-up) - the schema is already defined to accept them.
 import os
 import time
 import json
+from datetime import date
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -27,6 +28,7 @@ if not _API_KEYS:
     raise RuntimeError("GEMINI_API_KEY not set in .env")
 
 DEFAULT_LLM_MODEL = "gemini-2.5-flash"  # 2.5-pro requires paid tier; flash supports structured outputs on free tier
+DEFAULT_TEMPERATURE = 0.0
 
 SYSTEM_INSTRUCTION = (
     "당신은 인증받은 산업안전 검사관으로서 검사 보고서를 작성합니다. "
@@ -42,6 +44,15 @@ SYSTEM_INSTRUCTION = (
     "5. overall_severity는 위반 중 최악 값(준수 시 NONE).\n"
     "6. 제공된 장면 분석에 근거해 사실 기반으로 작성. 위반을 지어내지 마세요.\n"
     "7. 모든 텍스트 필드(설명·조치·인용 quote·summary)는 한국어로 작성."
+)
+
+
+REPORT_OUTPUT_CONTRACT = (
+    "\n\n출력 계약:\n"
+    "- VLM unknown PPE, analysis_limitations, partial/severe occlusion은 확정 위반으로 만들지 말고 재확인 필요로만 서술.\n"
+    "- 장면 맥락 위험만으로 보이지 않는 작업 조건이나 법적 위반을 추가로 단정하지 말 것.\n"
+    "- citations는 제공된 RAG 조항에서만 사용하고, 조항이 없으면 빈 목록으로 둘 것.\n"
+    "- report date는 파이프라인 메타데이터가 최종 주입하므로 임의 날짜를 근거로 서술하지 말 것."
 )
 
 
@@ -108,9 +119,10 @@ def generate_report(
     vlm_analysis,
     model: str = DEFAULT_LLM_MODEL,
     prompt_variant: str = "default",
-    temperature: float = 0.2,
+    temperature: float = DEFAULT_TEMPERATURE,
     client: Optional[genai.Client] = None,
     retrieved_clauses: Optional[List[Dict[str, Any]]] = None,
+    report_date: Optional[str] = None,
 ) -> Dict[str, Any]:
     """VLM 장면 분석으로부터 구조화된 안전 검사 보고서 생성.
 
@@ -135,7 +147,7 @@ def generate_report(
     # RAG 검색 컨텍스트 구성 (인용은 이 컨텍스트에서만 허용)
     rag_context = format_context(retrieved_clauses) if retrieved_clauses else ""
 
-    user_text = _build_llm_prompt(prompt_variant, vlm_json, rag_context=rag_context)
+    user_text = _build_llm_prompt(prompt_variant, vlm_json, rag_context=rag_context) + REPORT_OUTPUT_CONTRACT
 
     config = gtypes.GenerateContentConfig(
         system_instruction=SYSTEM_INSTRUCTION,
@@ -155,6 +167,7 @@ def generate_report(
 
     if parsed is None:
         raise ValueError("LLM returned no parsed structured output")
+    parsed.date = report_date or date.today().isoformat()
 
     return {
         "parsed": parsed,
@@ -186,7 +199,7 @@ if __name__ == "__main__":
             violation_texts.append(f"{w.worker_id} 헬멧(안전모) 미착용")
         if getattr(w.vest, "value", None) == "missing":
             violation_texts.append(f"{w.worker_id} 안전조끼 미착용")
-    violation_texts.extend([str(d) for d in parsed_vlm.immediate_dangers if d])
+    # Structured immediate_dangers require the canonical RAG query builder.
     clauses = retrieve_for_violations(violation_texts) if violation_texts else []
     print(f"=== RAG retrieved {len(clauses)} clauses ===")
     for c in clauses:
@@ -194,4 +207,3 @@ if __name__ == "__main__":
     llm_res = generate_report(vlm_res["parsed"], retrieved_clauses=clauses)
     print(json.dumps(llm_res["parsed"].model_dump(), indent=2, ensure_ascii=False))
     print(f"\nllm latency={llm_res['latency_ms']}ms tokens={llm_res['prompt_tokens']}+{llm_res['output_tokens']} retrieved={llm_res['retrieved_count']}")
-

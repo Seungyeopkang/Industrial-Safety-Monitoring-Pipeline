@@ -51,6 +51,10 @@ def _split_long(text: str, max_chars: int = MAX_CHUNK_CHARS, overlap: int = OVER
     return parts
 
 
+def _stable_id(*parts: str) -> str:
+    return hashlib.sha256("::".join(parts).encode("utf-8")).hexdigest()[:24]
+
+
 def chunk_document(doc: Dict) -> List[Dict]:
     """단일 문서를 조문 단위 청크로 분할."""
     text = doc["text"]
@@ -70,9 +74,11 @@ def chunk_document(doc: Dict) -> List[Dict]:
             return
         article = current_header or "서문"
         title = current_title or (doc.get("filename", source))
-        base = f"{source}::{article}::{title}"
+        doc_id = str(doc.get("doc_id") or _stable_id(source))
+        parent_id = _stable_id(doc_id, article, title)
+        parent_text = (f"[{article}] {title}\n{body}").strip()
         for i, piece in enumerate(_split_long(body)):
-            cid = hashlib.md5((base + str(i)).encode("utf-8")).hexdigest()[:12]
+            cid = _stable_id(doc_id, parent_id, str(i), piece)
             head = f"[{article}] {title}\n" if current_header else ""
             chunks.append({
                 "id": cid,
@@ -80,6 +86,13 @@ def chunk_document(doc: Dict) -> List[Dict]:
                 "source": source,
                 "article": article,
                 "title": title,
+                "doc_id": doc_id,
+                "parent_id": parent_id,
+                "child_id": cid,
+                "chunk_type": "child",
+                "section_path": f"{source} > {article} > {title}",
+                "child_index": i,
+                "parent_text": parent_text,
             })
 
     for raw in lines:
@@ -123,9 +136,20 @@ def chunk_documents(docs: List[Dict]) -> List[Dict]:
     for d in docs:
         all_chunks.extend(chunk_document(d))
     # 전역 카운터로 고유 ID 재할당 (조문 번호 중복으로 인한 해시 충돌 방지)
-    for idx, c in enumerate(all_chunks):
-        c["id"] = f"c{idx:05d}"
     return all_chunks
+
+
+def parent_documents(chunks: List[Dict]) -> Dict[str, Dict]:
+    """Deduplicate full article text for citation and context expansion."""
+    parents = {}
+    for chunk in chunks:
+        parents.setdefault(chunk["parent_id"], {
+            "doc_id": chunk["doc_id"], "parent_id": chunk["parent_id"],
+            "source": chunk["source"], "article": chunk["article"],
+            "title": chunk["title"], "section_path": chunk["section_path"],
+            "text": chunk["parent_text"],
+        })
+    return parents
 
 
 if __name__ == "__main__":

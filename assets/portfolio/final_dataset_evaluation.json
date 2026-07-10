@@ -1,0 +1,48 @@
+{
+  "model": "Hansung-Cho/yolov8-ppe-detection",
+  "confidence_threshold": 0.25,
+  "iou_threshold": 0.5,
+  "datasets": {
+    "Construction-PPE": {
+      "test_images": 141,
+      "metrics": {
+        "helmet": {
+          "precision": 0.81,
+          "recall": 0.777,
+          "f1": 0.793
+        },
+        "no_helmet": {
+          "precision": 0.209,
+          "recall": 0.225,
+          "f1": 0.217
+        },
+        "vest": {
+          "precision": 0.724,
+          "recall": 0.673,
+          "f1": 0.698
+        }
+      }
+    },
+    "Hard Hat Workers v10": {
+      "test_images": 706,
+      "metrics": {
+        "helmet": {
+          "precision": 0.495,
+          "recall": 0.498,
+          "f1": 0.496
+        },
+        "no_helmet": {
+          "precision": 0.094,
+          "recall": 0.08,
+          "f1": 0.086
+        },
+        "vest": {
+          "precision": 0.0,
+          "recall": 0,
+          "f1": 0
+        }
+      }
+    }
+  },
+  "total_test_images": 847
+}

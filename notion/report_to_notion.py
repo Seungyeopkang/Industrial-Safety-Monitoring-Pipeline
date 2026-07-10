@@ -229,7 +229,8 @@ def report_to_blocks(report: Dict[str, Any], metadata: Optional[Dict[str, Any]] 
         parsed = vlm["parsed"]
         blocks.append(_heading2("VLM 장면 분석"))
         blocks.append(_paragraph([_text(parsed.get("overall_description", ""))]))
-        dangers = parsed.get("immediate_dangers", [])
+        from vlm.schema import danger_descriptions
+        dangers = danger_descriptions(parsed.get("immediate_dangers", []))
         if dangers:
             blocks.append(_callout([_bold_text("즉각 위험: "), _text(", ".join(dangers))],
                                    color="red_background", emoji="🚨"))

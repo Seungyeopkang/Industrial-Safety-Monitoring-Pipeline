@@ -1,229 +1,158 @@
-# VLM-Based Industrial Safety Monitoring Pipeline
+# Industrial Safety Monitoring Pipeline
 
-[![Notion Dashboard](https://img.shields.io/badge/Notion-Dashboard-black?logo=notion)](https://fuzzy-wildebeest-406.notion.site/VLM-Safety-Monitor-38d73d4932e0807e9e35df13c2611834?source=copy_link)
+> Portfolio-scale safety inspection system: local PPE detection, VLM scene analysis, grounded regulation retrieval, and structured incident reporting.
 
-> A three-stage AI pipeline (Detection → VLM → LLM) for automated industrial safety monitoring, inspired by real-world solutions in the computer vision AI industry.
+[![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)](#run-locally)
+[![FastAPI](https://img.shields.io/badge/FastAPI-API-009688?logo=fastapi&logoColor=white)](#api-contract)
+[![Notion](https://img.shields.io/badge/Notion-Report%20Archive-black?logo=notion)](https://fuzzy-wildebeest-406.notion.site/VLM-Safety-Monitor-38d73d4932e0807e9e35df13c2611834?source=copy_link)
 
----
+## What It Does
 
-## Overview
-
-This project implements an end-to-end pipeline that analyzes workplace images to detect PPE (Personal Protective Equipment) violations and automatically generates safety inspection reports.
-
-The pipeline is designed to mirror real-world industrial safety AI systems, with each stage clearly separated by responsibility:
-
-| Stage | Model | Role |
-|---|---|---|
-| Detection | YOLO (pretrained) | Detect workers and PPE items |
-| Understanding | VLM API | Interpret the scene contextually |
-| Reporting | LLM API | Generate structured safety reports |
-| Storage | Notion API | Auto-save reports to Notion DB |
-
----
-
-## Pipeline Architecture
-
-The system operates in a hybrid, resource-optimized 6-step process:
-
-**1. Image Upload & Async Execution (Detection Model)**
-- User uploads an image to the FastAPI backend.
-- The local object detection model runs inference. If a potential anomaly or PPE violation is suspected (e.g., a person detected without a helmet or vest, or with ambiguous safety gear status), the system triggers the heavier VLM/LLM cloud pipeline asynchronously to keep the API responsive.
-
-**2. Metadata Extraction (Detection Model)**
-- The detection model detects workers and PPE items, outputting bounding boxes, classes, and confidence scores.
-- Rather than cropping the image (which destroys surrounding context), it generates a structured text summary of the detections (e.g., `Worker 1 (helmet: ✗, vest: ✓), Worker 2 (helmet: ✓, vest: ✓)`).
-
-**3. VLM Contextual Analysis (Method 2)**
-- Send the **original image** and the **detection model-extracted text metadata** together to the Vision-Language Model (VLM).
-- VLM interprets the full scene contextually (e.g., "Worker 1 is standing close to a heavy machinery danger zone without a helmet") while avoiding small-object detection hallucinations by relying on the detection model's pre-filter.
-
-**4. LLM Report Generation & Structured Outputs**
-- Receive VLM scene description as input.
-- Classify violation types (Missing PPE / Danger zone access / Abnormal behavior) and determine severity (High / Medium / Low).
-- Enforce strict JSON output format using **Pydantic schemas** (Structured Outputs) to guarantee schema compliance.
-- Generate actionable recommendations based on standard operating procedures (SOP) **retrieved via RAG**.
-- SOP documents (Korean safety regulations: 산업안전보건법·산업안전보건기준에 관한 규칙·KOSHA 안전보건가이드) are chunked, embedded, and stored in a local vector DB (Chroma). Relevant clauses are retrieved per violation and cited with actual section references, preventing hallucinated citations.
-
-**5. Result Storage**
-- Save complete pipeline output as a JSON file (detection results + VLM output + LLM report).
-- Automatically log results to the connected Notion Database using structural mapping.
-
-**6. HTML Result Dashboard**
-- Display the uploaded image with drawn bounding boxes.
-- Display the VLM situation description.
-- Display the final structured LLM report (Violations / Severity / Actions).
-
----
-
-## Tech Stack
-
-- **Detection:** Pretrained Object Detection Model (YOLO or others)
-- **VLM:** Vision Language Model API
-- **LLM:** Large Language Model API
-- **Backend:** FastAPI
-- **Frontend:** HTML (single page)
-- **RAG:** Local vector DB (Chroma) + bge-m3 (Korean-multilingual embedding) for Korean safety regulation (산업안전보건법·산안규·KOSHA) clause retrieval and citation
-- **Storage:** Notion API + JSON
-- **Language:** Python 3.10+
-
----
-
-## Project Structure
-
-```
-vlm-safety-monitor/
-├── detection/
-│   ├── detector.py            # YOLO inference, OpenCV viz, VLM trigger logic
-│   ├── vlm_trigger_rules.md   # Confidence-based VLM trigger spec
-│   ├── experiments/         # Model benchmarking & evaluations
-│   │   ├── benchmark.py
-│   │   ├── evaluate.py
-│   │   └── generate_report.py
-│   └── weights/             # Pretrained YOLO weights (PPE)
-├── vlm/
-│   ├── analyzer.py            # VLM scene analysis (Method 2: image + detection metadata)
-│   └── schema.py              # VLMSceneAnalysis Pydantic schema
-├── llm/
-│   ├── reporter.py            # LLM safety report generation (Structured Outputs)
-│   └── schema.py              # SafetyReport Pydantic schema (with SOP citations)
-├── experiments/
-│   ├── prompt_optimization.py # VLM/LLM prompt variant comparison
-│   └── visualize_prompt_opt.py# Results visualization
-├── notion/
-│   ├── notion_logger.py       # Notion API integration
-│   ├── create_devlog.py     # Programmatic devlog creation
-│   ├── update_progress.py   # Notion progress synchronization
-│   └── archive/             # Archived/one-off utility scripts
-├── api/
-│   └── main.py              # FastAPI endpoints
-├── frontend/
-│   └── index.html           # Single page UI
-├── outputs/
-│   └── results/             # JSON result storage
-├── assets/
-│   └── sample_images/       # Test images
-├── requirements.txt
-└── README.md
+```text
+media input -> YOLO PPE detection -> VLM scene analysis -> RAG regulation retrieval -> LLM report -> Notion archive
 ```
 
----
+- Accepts images, videos, and browser-camera frames.
+- Detects people and PPE locally, then sends only ambiguous or violation-like events to Gemini VLM.
+- Represents uncertainty through `unknown`, visibility, occlusion, and analysis-limitations fields.
+- Retrieves Korean safety regulations with typed canonical RAG queries, then produces a structured report with grounded citations.
+- Archives the captured source image and rendered UI report in Notion.
+- Uses two-frame confirmation, cooldown, bounded queueing, and in-memory video processing for streaming input.
 
-## Getting Started
+## Product Evidence
 
-### 1. Clone the repository
+### Live Operations Console
+
+![Live operations console](assets/portfolio/ui-live-empty-state.png)
+
+### Inspection Dashboard
+
+The dashboard brings severity, violations, recommended actions, regulation citations, and VLM scene analysis into one operational view.
+
+![Safety inspection dashboard](assets/portfolio/ui-result-dashboard.png)
+
+### Captured Report And Detection Evidence
+
+The rendered report is captured for the Notion audit record. The annotated source image remains linked to the structured result.
+
+| Rendered report capture | YOLO detection evidence |
+| --- | --- |
+| ![Captured safety report](assets/portfolio/ui-report-capture.png) | ![Annotated PPE detection](assets/portfolio/annotated-detection.jpg) |
+
+## Architecture
+
+| Layer | Responsibility | Guardrail |
+| --- | --- | --- |
+| YOLO | Boxes, classes, confidence | Low-F1 violation classes trigger review rather than final truth. |
+| VLM | Scene context and worker PPE state | Uses `unknown` for occlusion, low light, glare, or detector/image conflict. |
+| RAG | Regulation retrieval | Canonical typed queries, similarity threshold, required-term gate, parent-child chunks. |
+| LLM | Report, severity, actions, citations | Cites only retrieved clauses; pipeline controls report date. |
+| FastAPI | Upload, queue, status, results | Typed public output filters paths, tracebacks, raw RAG text, and internal IDs. |
+| Notion | Inspection archive | Stores source-image and UI-report captures per job. |
+
+## Evaluation Snapshot
+
+Deployed detector: `Hansung-Cho/yolov8-ppe-detection`, evaluated at confidence `0.25` and IoU `0.50` on every currently available labeled test image.
+
+| Dataset | Test images | Helmet F1 | No-helmet F1 | Vest F1 |
+| --- | ---: | ---: | ---: | ---: |
+| Construction-PPE | 141 | 0.793 | 0.217 | 0.698 |
+| Hard Hat Workers v10 | 706 | 0.496 | 0.086 | N/A |
+
+The low no-helmet F1 is why violation-like detector findings enter the VLM review path instead of becoming unqualified final findings. The available data is PPE/construction focused; this is **not** a claim of logistics-site or general industrial-domain coverage.
+
+![Model evaluation comparison](assets/portfolio/model-evaluation.png)
+
+### End-To-End Latency
+
+Measured on `Construction-PPE/image1.jpeg` with the full VLM/RAG/LLM path:
+
+| Stage | Cold run | Warm run |
+| --- | ---: | ---: |
+| YOLO inference | 19.0 ms | 24.2 ms |
+| VLM API | 14.69 s | 14.91 s |
+| RAG | 26.44 s | 34.8 ms |
+| LLM API | 19.32 s | 18.10 s |
+| Total | 60.47 s | 33.07 s |
+
+YOLO weights and the RAG embedder/vector store are process-cached. After warm-up, external VLM/LLM calls are the dominant latency. VLM and LLM are intentionally not parallelized: the report must consume VLM evidence and the RAG clauses derived from it.
+
+Reproduce the evidence:
 
 ```bash
-git clone https://github.com/your-username/vlm-safety-monitor.git
-cd vlm-safety-monitor
+python -m detection.experiments.final_dataset_evaluation
+python -m detection.experiments.pipeline_benchmark datasets/construction-ppe/images/test/image1.jpeg --warm-runs 3 --pipeline-runs 2
 ```
 
-### 2. Install dependencies
+Versioned experiment outputs: [dataset evaluation](assets/portfolio/final_dataset_evaluation.json) and [pipeline latency benchmark](assets/portfolio/pipeline_latency_benchmark.json).
+
+## Run Locally
 
 ```bash
+git clone <your-repository-url>
+cd Industrial_Safety_Monitoring_Pipeline
+python -m venv .venv
+.venv\Scripts\activate
 pip install -r requirements.txt
-```
-
-### 3. Set environment variables
-
-```bash
-cp .env.example .env
-```
-
-```env
-VLM_API_KEY=your_vlm_api_key
-LLM_API_KEY=your_llm_api_key
-NOTION_API_KEY=your_notion_api_key
-NOTION_DATABASE_ID=your_notion_database_id
-NOTION_PAGE_ID=your_notion_page_id
-NOTION_SPRINT_DB_ID=your_notion_sprint_db_id
-NOTION_PREVIOUS_PAGE_ID=your_notion_previous_page_id
-```
-
-### 4. Run the server
-
-```bash
+copy .env.example .env
 uvicorn api.main:app --reload
 ```
 
-### 5. Open the UI
+Open `http://127.0.0.1:8000` for the operations console and `http://127.0.0.1:8000/docs` for the OpenAPI contract.
 
-```
-http://localhost:8000
-```
+Required `.env` values:
 
----
-
-## Output Example
-
-### Detection Result
-```
-[Worker 1] helmet: ✗  vest: ✓  gloves: ✗
-[Worker 2] helmet: ✓  vest: ✓  gloves: ✓
-[Worker 3] helmet: ✗  vest: ✗  gloves: ✗
+```env
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_API_KEY2=optional_fallback_key
+NOTION_API_KEY=your_notion_api_key
+NOTION_REPORT_PARENT_PAGE_ID=your_notion_parent_page_id
+NOTION_AUTO_EXPORT=1
 ```
 
-### VLM Scene Description
+Set `NOTION_AUTO_EXPORT=0` to run without creating a Notion page.
+
+## API Contract
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /upload` | Upload an image or video and receive a queue-backed job id. |
+| `POST /stream/frame/{stream_id}` | Submit one browser-camera frame; only confirmed events enter the full pipeline. |
+| `GET /status/{job_id}` | Read public progress without internal paths or tracebacks. |
+| `GET /results/{job_id}` | Receive validated Detection, VLM, RAG, LLM, report, Notion, and timing fields. |
+| `GET /health` | Inspect queue capacity and drop/reject counters. |
+
+`/results` is an allow-listed Pydantic response. Raw RAG chunks, local paths, tracebacks, provider details, and Notion internal IDs do not leave the API boundary.
+
+## Repository Layout
+
+```text
+api/                    FastAPI app and public response schemas
+detection/              YOLO detector, stream/video policy, evaluations
+vlm/                    VLM prompt variants and structured scene schema
+rag/                    Canonical query builder, parent-child RAG, incremental indexing
+llm/                    Structured safety-report generator
+notion/                 Report export, Devlog, and Sprint progress tools
+frontend/               Single-page operations console
+tests/                  Contract, stream, queue, RAG, VLM, and LLM regression tests
+assets/portfolio/       Versioned UI, report, and detection evidence used above
 ```
-Three workers detected in an industrial zone. 
-Worker 1 and Worker 3 are not wearing helmets. 
-Worker 3 is also missing a safety vest and approaching a restricted area.
+
+## Validation
+
+```bash
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-### LLM Safety Report
-```
-[Safety Inspection Report]
-- Date: 2026-06-29
-- Violations Detected: 3
-  · PPE Missing (Helmet): Worker 1, Worker 3
-  · PPE Missing (Vest): Worker 3
-  · Restricted Area Access: Worker 3
-- Severity: HIGH
-- Recommended Action:
-  · Immediately halt Worker 3's activity
-  · Issue PPE to Worker 1 and Worker 3 before resuming work
-  · Reference: SOP Section 3.2 - Mandatory PPE Requirements
-```
+Latest final regression suite: `22/22` passing. It covers API response filtering, prompt contracts, VLM confidence/occlusion behavior, RAG gates and incremental indexing, queue bounds, and stream confirmation.
 
----
+## Known Limits And Next Work
 
-## Notion Integration
-
-Each pipeline run automatically creates a new page in the connected Notion database, containing:
-
-- Input image
-- Detection summary
-- VLM scene description
-- Full LLM safety report
-- Severity level & timestamp
-
----
-
-## Design Decisions
-
-**Why separate Detection and VLM?**
-YOLO provides fast, precise bounding boxes but lacks contextual understanding. VLM adds scene-level reasoning on top of detection results, enabling nuanced descriptions that rule-based systems cannot produce.
-
-**Why separate VLM and LLM?**
-Raw VLM output is descriptive but unstructured. A dedicated LLM step refines this into a structured report with violation classification, severity scoring, and actionable recommendations aligned with SOP guidelines.
-
-**Why Notion over a database?**
-For a portfolio-scale project, Notion provides an immediately accessible, visually rich storage layer without requiring infrastructure setup, while demonstrating API integration skills.
-
-**Why RAG for SOP retrieval?**
-Hardcoding SOP text in prompts risks fabricated citations (e.g., referencing non-existent sections). Retrieving relevant clauses from a local vector DB built on Korean safety regulations (산업안전보건법·산업안전보건기준에 관한 규칙·KOSHA 안전보건가이드) ensures every recommendation cites a real section, while naturally mitigating LLM hallucination - the LLM is constrained to cite only clauses present in the retrieved RAG context. A multilingual embedding model (bge-m3) is used so Korean-language queries retrieve Korean regulation clauses with high semantic accuracy.
-
----
-
-
-## Future Work
-
-- Real-time video stream support
-- Multi-camera input handling
-- Fine-tuned VLM on industrial safety datasets
-- Dashboard with violation trend analytics
-
----
+- No new logistics, manufacturing, or site-specific held-out data has been collected. Domain-generalization claims are deferred.
+- VLM/LLM quality depends on external provider availability and rate limits. Startup warm-up and provider-specific backoff metrics are the next operations work.
+- Occlusion and lighting use deterministic synthetic transformations; real field-condition evaluation needs separately collected, labeled footage.
+- YOLO is not retrained in this scope. Weak detector classes are routed to review and explicitly documented.
 
 ## License
 
-MIT License
+MIT

@@ -70,18 +70,30 @@
         <div class="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
           <h2 class="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">
             <svg class="w-4 h-4 text-safety-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/></svg>
-            이미지 업로드
+            이미지 / 동영상 업로드
           </h2>
           <!-- 드래그앤드롭 영역 -->
           <div id="dropzone" class="border-2 border-dashed border-slate-600 rounded-lg p-8 text-center cursor-pointer hover:border-safety-500 hover:bg-safety-500/5 transition-colors group">
             <svg class="w-10 h-10 mx-auto mb-3 text-slate-500 group-hover:text-safety-500 transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/></svg>
-            <p class="text-sm text-slate-300 mb-1">이미지를 드래그하거나 <span class="text-safety-500 font-medium">클릭하여 선택</span></p>
-            <p class="text-xs text-slate-500">JPG, PNG, WEBP (최대 10MB)</p>
-            <input id="fileInput" type="file" accept="image/*" class="hidden" />
+            <p class="text-sm text-slate-300 mb-1">이미지 또는 동영상을 드래그하거나 <span class="text-safety-500 font-medium">클릭하여 선택</span></p>
+            <p class="text-xs text-slate-500">JPG, PNG, WEBP (최대 10MB) / MP4, WEBM, MOV (최대 100MB)</p>
+            <input id="fileInput" type="file" accept="image/*,video/mp4,video/webm,video/quicktime" class="hidden" />
+          </div>
+          <div class="mt-3 flex gap-2">
+            <button id="startStreamBtn" type="button" class="flex-1 bg-slate-700 hover:bg-slate-600 text-slate-200 font-medium py-2 rounded-lg text-sm">카메라 스트림 시작</button>
+            <button id="stopStreamBtn" type="button" disabled class="bg-slate-700 disabled:opacity-40 text-slate-200 font-medium px-3 py-2 rounded-lg text-sm">중지</button>
+          </div>
+          <video id="streamPreview" class="hidden w-full mt-3 rounded-lg border border-slate-700" autoplay muted playsinline></video>
+          <p id="streamStatus" class="hidden text-xs text-slate-400 mt-2"></p>
+          <div class="mt-4 border border-slate-700 rounded-lg p-3 text-xs text-slate-400 space-y-1">
+            <div class="flex justify-between"><span>처리 대기열</span><span id="queueStatus">확인 중</span></div>
+            <div class="flex justify-between"><span>스트림 이벤트</span><span id="streamEventStatus">대기</span></div>
+            <p class="text-slate-500">Notion은 확정 이벤트의 최종 보고서 및 감사 기록으로 저장됩니다.</p>
           </div>
           <!-- 미리보기 (업로드 후) -->
           <div id="preview" class="hidden mt-4">
             <img id="previewImg" class="w-full rounded-lg border border-slate-700" alt="미리보기" />
+            <video id="previewVideo" class="hidden w-full rounded-lg border border-slate-700" controls muted playsinline></video>
             <p id="previewName" class="text-xs text-slate-400 mt-2 truncate"></p>
           </div>
           <!-- 분석 버튼 -->
@@ -143,13 +155,67 @@
     const fileInput = document.getElementById('fileInput');
     const preview = document.getElementById('preview');
     const previewImg = document.getElementById('previewImg');
+    const previewVideo = document.getElementById('previewVideo');
     const previewName = document.getElementById('previewName');
     const analyzeBtn = document.getElementById('analyzeBtn');
+    const startStreamBtn = document.getElementById('startStreamBtn');
+    const stopStreamBtn = document.getElementById('stopStreamBtn');
+    const streamPreview = document.getElementById('streamPreview');
+    const streamStatus = document.getElementById('streamStatus');
+    const queueStatus = document.getElementById('queueStatus');
+    const streamEventStatus = document.getElementById('streamEventStatus');
     const progressCard = document.getElementById('progressCard');
     const progressSteps = document.getElementById('progressSteps');
     const progressMessage = document.getElementById('progressMessage');
     const resultDashboard = document.getElementById('resultDashboard');
     const emptyState = document.getElementById('emptyState');
+    let cameraStream = null;
+    let streamTimer = null;
+    const streamId = crypto.randomUUID();
+
+    async function refreshOperationsConsole() {
+      try {
+        const health = await fetch('/health').then(res => res.json());
+        const queue = health.queue || {};
+        queueStatus.textContent = `${queue.pending || 0} / ${queue.capacity || '-'} 대기 · 드롭 ${queue.dropped || 0}`;
+      } catch (_) { queueStatus.textContent = '서버 연결 확인 필요'; }
+    }
+    refreshOperationsConsole();
+    setInterval(refreshOperationsConsole, 3000);
+
+    startStreamBtn.addEventListener('click', async () => {
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+        streamPreview.srcObject = cameraStream;
+        streamPreview.classList.remove('hidden'); streamStatus.classList.remove('hidden');
+        streamStatus.textContent = '카메라 프레임 확인 중';
+        startStreamBtn.disabled = true; stopStreamBtn.disabled = false;
+        streamTimer = setInterval(sendStreamFrame, 500);
+      } catch (error) { alert('카메라를 시작할 수 없습니다: ' + error.message); }
+    });
+
+    stopStreamBtn.addEventListener('click', async () => {
+      if (streamTimer) clearInterval(streamTimer);
+      if (cameraStream) cameraStream.getTracks().forEach(track => track.stop());
+      await fetch('/stream/' + streamId, { method: 'DELETE' });
+      cameraStream = null; streamPreview.srcObject = null; streamPreview.classList.add('hidden');
+      streamStatus.textContent = '카메라 스트림 중지'; startStreamBtn.disabled = false; stopStreamBtn.disabled = true;
+    });
+
+    async function sendStreamFrame() {
+      if (!cameraStream || streamPreview.videoWidth === 0) return;
+      const canvas = document.createElement('canvas');
+      canvas.width = streamPreview.videoWidth; canvas.height = streamPreview.videoHeight;
+      canvas.getContext('2d').drawImage(streamPreview, 0, 0);
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.8));
+      if (!blob) return;
+      const form = new FormData(); form.append('file', blob, 'stream.jpg');
+      const res = await fetch('/stream/frame/' + streamId, { method: 'POST', body: form });
+      if (!res.ok) return;
+      const data = await res.json(); streamStatus.textContent = data.reason;
+      streamEventStatus.textContent = data.dropped ? '큐 포화로 드롭' : data.job_id ? `보고서 작업 ${data.job_id}` : '프레임 스킵';
+      if (data.job_id) { currentJobId = data.job_id; showProgress(); startPolling(); }
+    }
 
     // --- 파일 선택 처리 ---
     dropzone.addEventListener('click', () => fileInput.click());
@@ -163,6 +229,21 @@
     });
 
     function handleFile(file) {
+      if (file.type.startsWith('video/')) {
+        if (file.size > 100 * 1024 * 1024) { alert('동영상은 100MB 이하여야 합니다.'); return; }
+        selectedFile = file;
+        previewImg.classList.add('hidden');
+        previewVideo.classList.remove('hidden');
+        previewVideo.src = URL.createObjectURL(file);
+        previewName.textContent = file.name;
+        preview.classList.remove('hidden');
+        analyzeBtn.classList.remove('hidden');
+        analyzeBtn.disabled = false;
+        return;
+      }
+      previewVideo.pause();
+      previewVideo.classList.add('hidden');
+      previewImg.classList.remove('hidden');
       if (!file.type.startsWith('image/')) { alert('이미지 파일만 업로드 가능합니다.'); return; }
       if (file.size > 10 * 1024 * 1024) { alert('파일 크기는 10MB 이하여야 합니다.'); return; }
       selectedFile = file;
@@ -337,10 +418,11 @@
       const citeCard = citations.length ? `<div class="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
         <h2 class="text-sm font-semibold text-slate-300 mb-3 flex items-center gap-2">법령 인용 (RAG 기반)<span class="text-xs text-slate-500 font-normal">· 환각 방지: 검색된 조항만 인용</span></h2>
         <div class="space-y-2">${citations.map(c => `<div class="bg-slate-900/40 border-l-2 border-safety-500 rounded-r-lg p-3"><p class="text-sm text-safety-300 font-medium">${c.source} · ${c.clause}</p><p class="text-xs text-slate-400 mt-1 italic">"${c.quote}"</p></div>`).join('')}</div></div>` : '';
+      const dangerDescriptions = (vlm && vlm.immediate_dangers ? vlm.immediate_dangers : []).map(d => typeof d === 'string' ? d : (d.description || '')).filter(Boolean);
       const vlmCard = vlm ? `<div class="bg-slate-800/50 border border-slate-700 rounded-xl p-5">
         <h2 class="text-sm font-semibold text-slate-300 mb-3">VLM 장면 분석</h2>
         <p class="text-sm text-slate-300 leading-relaxed">${vlm.overall_description || ''}</p>
-        ${vlm.immediate_dangers && vlm.immediate_dangers.length ? `<p class="text-xs text-red-300 mt-3">⚠️ 즉각 위험: ${vlm.immediate_dangers.join(', ')}</p>` : ''}</div>` : '';
+        ${dangerDescriptions.length ? `<p class="text-xs text-red-300 mt-3">⚠️ 즉각 위험: ${dangerDescriptions.join(', ')}</p>` : ''}</div>` : '';
       const perfCard = `<div class="bg-slate-800/30 border border-slate-700/50 rounded-xl p-4"><p class="text-xs text-slate-500">VLM: ${data.vlm ? data.vlm.latency_ms + 'ms' : '스킵'} · LLM: ${llm.latency_ms ? llm.latency_ms + 'ms' : '-'} · RAG: ${data.rag ? data.rag.retrieved_count + '건' : '-'} · 토큰: ${data.vlm ? data.vlm.prompt_tokens + '+' + data.vlm.output_tokens : '-'} / ${llm.prompt_tokens ? llm.prompt_tokens + '+' + llm.output_tokens : '-'}</p></div>`;
       const notionCard = notion.success && notion.page_url ? `<div data-notion-card="true" class="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 flex items-center justify-between gap-3">
         <div><p class="text-sm font-medium text-emerald-200">Notion 보고서 저장 완료</p><p class="text-xs text-emerald-300/70 mt-1">분석 결과가 Notion 데이터베이스에 자동 기록되었습니다.</p></div>

@@ -16,5 +16,9 @@ detection/weights/
 datasets/
 outputs/uploads/
 outputs/annotated/
+outputs/robustness/
+outputs/vlm_regression/
+outputs/rag_evaluation/
 outputs/*.err
 outputs/*.out
+review_guide/

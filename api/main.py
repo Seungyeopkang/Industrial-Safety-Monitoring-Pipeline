@@ -17,6 +17,7 @@ import json
 import uuid
 import traceback
 import base64
+import asyncio
 from datetime import date
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -24,6 +25,10 @@ from typing import Dict, Any, Optional
 from fastapi import FastAPI, UploadFile, File, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse, Response
+from api.schemas import (
+    FailedResultResponse, HealthResponse, JobStatusResponse, PendingResultResponse, PipelineResultResponse,
+    UploadResponse, public_job_status, public_pipeline_result,
+)
 
 # 프로젝트 루트를 sys.path에 추가 (모듈 임포트용)
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -48,6 +53,10 @@ for d in (UPLOAD_DIR, RESULTS_DIR, ANNOTATED_DIR, REPORT_SCREENSHOT_DIR):
 
 # 메모리 잡 상태 저장 (포트폴리오 규모. 재시작 시 리셋)
 JOBS: Dict[str, Dict[str, Any]] = {}
+STREAMS: Dict[str, Any] = {}
+PIPELINE_QUEUE: asyncio.Queue = asyncio.Queue(maxsize=3)
+PIPELINE_WORKER_TASK = None
+PIPELINE_METRICS = {"accepted": 0, "dropped": 0, "rejected": 0}
 
 
 class ReportScreenshotPayload(BaseModel):
@@ -59,15 +68,85 @@ def _set_status(job_id: str, status: str, **extra):
     JOBS.setdefault(job_id, {}).update({"status": status, "updated_at": time.time(), **extra})
 
 
-def _run_pipeline(job_id: str, image_path: str):
+async def _pipeline_worker():
+    """Run one expensive YOLO/VLM/RAG/LLM job at a time from a bounded queue."""
+    while True:
+        job_id, image_path, media_type = await PIPELINE_QUEUE.get()
+        try:
+            _set_status(job_id, "running", stage="dequeued", message="처리 슬롯 확보")
+            await asyncio.to_thread(_run_pipeline, job_id, image_path, media_type)
+        finally:
+            PIPELINE_QUEUE.task_done()
+
+
+async def _enqueue_pipeline(job_id: str, image_path: str, media_type: str) -> int:
+    if PIPELINE_QUEUE.full():
+        raise HTTPException(status_code=429, detail="처리 대기열이 가득 찼습니다. 잠시 후 다시 시도하세요.")
+    await PIPELINE_QUEUE.put((job_id, image_path, media_type))
+    PIPELINE_METRICS["accepted"] += 1
+    position = PIPELINE_QUEUE.qsize()
+    _set_status(job_id, "queued", stage="queued", message="대기열 등록", queue_position=position)
+    return position
+
+
+@app.on_event("startup")
+async def start_pipeline_worker():
+    global PIPELINE_WORKER_TASK
+    if PIPELINE_WORKER_TASK is None or PIPELINE_WORKER_TASK.done():
+        PIPELINE_WORKER_TASK = asyncio.create_task(_pipeline_worker())
+
+
+def _run_pipeline(job_id: str, image_path: str, media_type: str = "image"):
     """백그라운드 파이프라인: YOLO → VLM → RAG → LLM → 저장.
     잡 상태를 단계별로 갱신하여 프론트엔드가 진행 상황을 표시할 수 있도록 함."""
+    started_at = time.perf_counter()
+    stage_started_at = started_at
+    stages_ms: Dict[str, float] = {}
+
+    def finish_stage(stage: str) -> None:
+        nonlocal stage_started_at
+        now = time.perf_counter()
+        stages_ms[stage] = round((now - stage_started_at) * 1000, 1)
+        stage_started_at = now
+
     result: Dict[str, Any] = {"job_id": job_id}
+    video_vlm_confirmed = True
+    if media_type == "video":
+        # Decode/sample in memory; persist only the one representative frame.
+        try:
+            from detection.video import select_video_frame
+            import cv2
+            selection = select_video_frame(image_path)
+            representative_path = UPLOAD_DIR / f"{job_id}_selected.jpg"
+            cv2.imwrite(str(representative_path), selection["frame"])
+            image_path = str(representative_path)
+            video_vlm_confirmed = selection["confirmed"]
+            result["media"] = {
+                "type": "video",
+                "representative_frame_path": image_path,
+                "representative_frame_index": selection["frame_index"],
+                "sampled_frames": selection["sampled_frames"],
+                "source_fps": selection["source_fps"],
+                "sample_fps": selection["sample_fps"],
+                "confirmation_frames": selection["confirmation_frames"],
+                "confirmed_candidate": video_vlm_confirmed,
+                "selection_reason": selection["selection_reason"],
+            }
+        except Exception as exc:
+            err = f"{type(exc).__name__}: {exc}"
+            _set_status(job_id, "failed", stage="error", message=err)
+            (RESULTS_DIR / f"{job_id}.json").write_text(
+                json.dumps({"job_id": job_id, "error": err}, ensure_ascii=False), encoding="utf-8"
+            )
+            return
+    else:
+        result["media"] = {"type": media_type}
     try:
         # 1) YOLO 탐지
         _set_status(job_id, "running", stage="detection", message="YOLO 객체 탐지 중")
         from detection.detector import run_detection
         det_out, annotated = run_detection(image_path)
+        finish_stage("detection")
         detections = det_out["detections"]
         import cv2
         annotated_path = ANNOTATED_DIR / f"{job_id}_annotated.jpg"
@@ -86,6 +165,21 @@ def _run_pipeline(job_id: str, image_path: str):
             if classes and classes <= {"Person"}:
                 needs_vlm = True
 
+        # Empty frames are expected in video/stream inputs. A VLM event must
+        # also have survived the consecutive-frame confirmation gate.
+        if media_type == "video":
+            needs_vlm = needs_vlm and video_vlm_confirmed
+        result["vlm_dispatch"] = {
+            "should_dispatch": needs_vlm,
+            "reason": (
+                "consecutive_candidate_confirmed"
+                if media_type == "video" and video_vlm_confirmed and needs_vlm
+                else "video_no_confirmed_candidate_skip"
+                if media_type == "video" and not video_vlm_confirmed
+                else "image_trigger_policy"
+            ),
+        }
+
         if not needs_vlm:
             _set_status(job_id, "running", stage="skipped_vlm", message="신뢰도 높음: VLM 스킵")
             result["vlm"] = None
@@ -103,7 +197,8 @@ def _run_pipeline(job_id: str, image_path: str):
             # 2) VLM 분석
             _set_status(job_id, "running", stage="vlm", message="VLM 장면 분석 중(Gemini API)")
             from vlm.analyzer import analyze_scene
-            vlm_res = analyze_scene(image_path, detections)
+            vlm_res = analyze_scene(image_path, detections, prompt_variant="role_constraints", temperature=0.0)
+            finish_stage("vlm")
             result["vlm"] = {
                 "parsed": vlm_res["parsed"].model_dump(),
                 "latency_ms": vlm_res["latency_ms"],
@@ -114,27 +209,57 @@ def _run_pipeline(job_id: str, image_path: str):
 
             # 3) RAG 검색 (위반 설명 → 한국 규정 조항)
             _set_status(job_id, "running", stage="rag", message="RAG 규정 조항 검색 중")
-            from rag.retriever import retrieve_for_violations
+            from rag.retriever import retrieve_for_query_records
+            from rag.danger_contract import eligible_danger_records
+            from rag.query_builder import build_canonical_queries
             parsed_vlm = vlm_res["parsed"]
-            violation_texts = []
-            for w in parsed_vlm.workers:
-                if getattr(w.helmet, "value", None) == "missing":
-                    violation_texts.append(f"{w.worker_id} 헬멧(안전모) 미착용")
-                if getattr(w.vest, "value", None) == "missing":
-                    violation_texts.append(f"{w.worker_id} 안전조끼 미착용")
-                if getattr(w.mask, "value", None) == "missing":
-                    violation_texts.append(f"{w.worker_id} 마스크 미착용")
-                if getattr(w.gloves, "value", None) == "missing":
-                    violation_texts.append(f"{w.worker_id} 장갑 미착용")
-            violation_texts.extend([str(d) for d in parsed_vlm.immediate_dangers if d])
-            clauses = retrieve_for_violations(violation_texts) if violation_texts else []
-            result["rag"] = {"retrieved_count": len(clauses), "clauses": clauses}
-            _set_status(job_id, "running", stage="rag_done", message=f"RAG 검색 완료: {len(clauses)}건")
+            danger_contract = eligible_danger_records(parsed_vlm.immediate_dangers)
+            canonical_queries = build_canonical_queries(parsed_vlm.workers, danger_contract)
+            try:
+                retrieval = retrieve_for_query_records(canonical_queries) if canonical_queries else {
+                    "clauses": [], "query_traces": []
+                }
+                clauses = retrieval["clauses"]
+                rag_status = "complete" if clauses else "no_relevant_context"
+                result["rag"] = {
+                    "status": rag_status,
+                    "retrieved_count": len(clauses),
+                    "clauses": clauses,
+                    "danger_contract": danger_contract,
+                    "canonical_queries": canonical_queries,
+                    "query_traces": retrieval["query_traces"],
+                }
+                finish_stage("rag")
+                _set_status(job_id, "running", stage="rag_done",
+                            message=f"RAG 검색 완료: {len(clauses)}건 ({rag_status})")
+            except Exception as rag_exc:
+                # The report can still describe the scene, but it must receive no
+                # clauses and therefore cannot cite regulations without evidence.
+                clauses = []
+                result["rag"] = {
+                    "status": "unavailable",
+                    "retrieved_count": 0,
+                    "clauses": [],
+                    "danger_contract": danger_contract,
+                    "canonical_queries": canonical_queries,
+                    "query_traces": [],
+                    "error": f"{type(rag_exc).__name__}: {rag_exc}",
+                }
+                finish_stage("rag")
+                _set_status(job_id, "running", stage="rag_unavailable",
+                            message="RAG unavailable: 근거 법령 인용 없이 보고서 생성")
 
             # 4) LLM 보고서 생성
             _set_status(job_id, "running", stage="llm", message="LLM 안전 보고서 생성 중(Gemini API)")
             from llm.reporter import generate_report
-            llm_res = generate_report(parsed_vlm, retrieved_clauses=clauses, prompt_variant="sop_grounded")
+            llm_res = generate_report(
+                parsed_vlm,
+                retrieved_clauses=clauses,
+                prompt_variant="sop_grounded",
+                temperature=0.0,
+                report_date=date.today().isoformat(),
+            )
+            finish_stage("llm")
             result["llm"] = {
                 "parsed": llm_res["parsed"].model_dump(),
                 "latency_ms": llm_res["latency_ms"],
@@ -157,6 +282,7 @@ def _run_pipeline(job_id: str, image_path: str):
                     image_url=image_url,
                     image_path=str(image_path),
                 )
+                finish_stage("notion")
                 if result["notion"].get("success"):
                     _set_status(job_id, "running", stage="notion_done", message="Notion 보고서 저장 완료")
                 elif result["notion"].get("skipped"):
@@ -165,12 +291,21 @@ def _run_pipeline(job_id: str, image_path: str):
                     _set_status(job_id, "running", stage="notion_failed", message="Notion 저장 실패(결과 JSON에는 기록)")
             except Exception as notion_exc:
                 result["notion"] = {"success": False, "error": f"{type(notion_exc).__name__}: {notion_exc}"}
+                finish_stage("notion")
                 _set_status(job_id, "running", stage="notion_failed", message="Notion 저장 실패(결과 JSON에는 기록)")
         else:
             result["notion"] = {"success": False, "skipped": True, "error": "NOTION_AUTO_EXPORT 비활성화 또는 report 없음"}
             _set_status(job_id, "running", stage="skipped_notion", message="Notion 저장 스킵")
 
         # 6) 결과 저장
+        if "notion" not in stages_ms:
+            stages_ms["notion"] = 0.0
+        for stage in ("vlm", "rag", "llm"):
+            stages_ms.setdefault(stage, 0.0)
+        result["metrics"] = {
+            "total_ms": round((time.perf_counter() - started_at) * 1000, 1),
+            "stages_ms": stages_ms,
+        }
         result_path = RESULTS_DIR / f"{job_id}.json"
         result_path.write_text(json.dumps(result, indent=2, ensure_ascii=False), encoding="utf-8")
         _set_status(job_id, "done", stage="complete", message="파이프라인 완료",
@@ -190,9 +325,13 @@ def _run_pipeline(job_id: str, image_path: str):
 
 # --- 엔드포인트 ---
 
-@app.get("/health")
+@app.get("/health", response_model=HealthResponse)
 async def health():
-    return {"status": "ok", "jobs_active": sum(1 for j in JOBS.values() if j.get("status") in ("queued", "running"))}
+    return {
+        "status": "ok",
+        "jobs_active": sum(1 for j in JOBS.values() if j.get("status") in ("queued", "running")),
+        "queue": {"pending": PIPELINE_QUEUE.qsize(), "capacity": PIPELINE_QUEUE.maxsize, **PIPELINE_METRICS},
+    }
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -204,38 +343,103 @@ async def index():
     return HTMLResponse(index_path.read_text(encoding="utf-8"))
 
 
-@app.post("/upload")
-async def upload(background_tasks: BackgroundTasks, file: UploadFile = File(...)):
+@app.post("/upload", response_model=UploadResponse)
+async def upload(file: UploadFile = File(...)):
     """이미지 업로드 → 비동기 파이프라인 시작 → job_id 즉시 반환."""
-    if not file.content_type or not file.content_type.startswith("image/"):
+    if not file.content_type or not (file.content_type.startswith("image/") or file.content_type.startswith("video/")):
         raise HTTPException(status_code=400, detail="이미지 파일만 업로드 가능합니다.")
     job_id = uuid.uuid4().hex[:12]
-    ext = Path(file.filename or "upload.jpg").suffix or ".jpg"
+    media_type = "video" if file.content_type.startswith("video/") else "image"
+    max_upload_bytes = 100 * 1024 * 1024 if media_type == "video" else 10 * 1024 * 1024
+    if file.size is not None and file.size > max_upload_bytes:
+        raise HTTPException(status_code=413, detail="파일 크기 제한을 초과했습니다.")
+    ext = Path(file.filename or ("upload.mp4" if media_type == "video" else "upload.jpg")).suffix
+    if not ext:
+        ext = ".mp4" if media_type == "video" else ".jpg"
     save_path = UPLOAD_DIR / f"{job_id}{ext}"
     save_path.write_bytes(await file.read())
     _set_status(job_id, "queued", stage="queued", message="대기 중",
                 filename=file.filename, image_path=str(save_path))
-    background_tasks.add_task(_run_pipeline, job_id, str(save_path))
-    return {"job_id": job_id, "status": "queued", "filename": file.filename}
+    try:
+        queue_position = await _enqueue_pipeline(job_id, str(save_path), media_type)
+    except HTTPException:
+        save_path.unlink(missing_ok=True)
+        PIPELINE_METRICS["rejected"] += 1
+        raise
+    JOBS[job_id].update(filename=file.filename, image_path=str(save_path))
+    return {"job_id": job_id, "status": "queued", "filename": file.filename,
+            "media_type": media_type, "queue_position": queue_position}
 
 
-@app.get("/status/{job_id}")
+@app.post("/stream/frame/{stream_id}")
+async def process_stream_frame(stream_id: str, file: UploadFile = File(...)):
+    """Accept one browser camera frame; only confirmed events enter the pipeline."""
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="스트림 프레임은 이미지여야 합니다.")
+    payload = await file.read()
+    if len(payload) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="스트림 프레임은 2MB 이하여야 합니다.")
+    from detection.live_stream import LiveStreamSession
+    session = STREAMS.get(stream_id)
+    if session is None:
+        session = LiveStreamSession()
+        STREAMS[stream_id] = session
+    frame, _, detection, decision, should_dispatch = await asyncio.to_thread(session.process_jpeg, payload)
+    response = {
+        "stream_id": stream_id,
+        "detections": len(detection["detections"]),
+        "vlm_dispatch": should_dispatch,
+        "reason": decision.reason,
+    }
+    if should_dispatch:
+        if PIPELINE_QUEUE.full():
+            PIPELINE_METRICS["dropped"] += 1
+            response.update({"vlm_dispatch": False, "reason": "stream_queue_full_dropped", "dropped": True})
+            return response
+        import cv2
+        job_id = uuid.uuid4().hex[:12]
+        frame_path = UPLOAD_DIR / f"{job_id}_stream.jpg"
+        cv2.imwrite(str(frame_path), frame)
+        _set_status(job_id, "queued", stage="queued", message="스트림 이벤트 분석 대기", image_path=str(frame_path))
+        queue_position = await _enqueue_pipeline(job_id, str(frame_path), "stream")
+        JOBS[job_id].update(stream_id=stream_id, image_path=str(frame_path))
+        response.update({"job_id": job_id, "queue_position": queue_position})
+    return response
+
+
+@app.delete("/stream/{stream_id}")
+async def close_stream(stream_id: str):
+    STREAMS.pop(stream_id, None)
+    return {"stream_id": stream_id, "closed": True}
+
+
+@app.get("/status/{job_id}", response_model=JobStatusResponse)
 async def status(job_id: str):
     """잡 상태 조회."""
     if job_id not in JOBS:
         raise HTTPException(status_code=404, detail="잡을 찾을 수 없습니다.")
-    return JOBS[job_id]
+    return public_job_status(job_id, JOBS[job_id])
 
 
-@app.get("/results/{job_id}")
+@app.get("/results/{job_id}", response_model=PipelineResultResponse | PendingResultResponse | FailedResultResponse)
 async def results(job_id: str):
     """최종 결과 JSON 반환."""
     result_path = RESULTS_DIR / f"{job_id}.json"
     if not result_path.exists():
         if job_id in JOBS:
-            return {"job_id": job_id, "status": JOBS[job_id].get("status"), "message": JOBS[job_id].get("message")}
+            return PendingResultResponse(
+                job_id=job_id,
+                status=JOBS[job_id].get("status", "failed"),
+                message=JOBS[job_id].get("message", ""),
+            )
         raise HTTPException(status_code=404, detail="결과를 찾을 수 없습니다.")
-    return json.loads(result_path.read_text(encoding="utf-8"))
+    try:
+        raw = json.loads(result_path.read_text(encoding="utf-8"))
+        if raw.get("error"):
+            return FailedResultResponse(job_id=job_id)
+        return public_pipeline_result(raw)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Stored result did not satisfy the public response contract.")
 
 
 @app.get("/annotated/{job_id}")

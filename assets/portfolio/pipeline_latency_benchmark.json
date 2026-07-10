@@ -1,0 +1,58 @@
+{
+  "image": "datasets\\construction-ppe\\images\\test\\image1.jpeg",
+  "quality_scope": {
+    "yolo": "Detection labels support class-level precision/recall/F1 evaluation.",
+    "vlm": "No scene-level ground truth is available, so this run reports contract/decision outputs rather than an invented VLM F1."
+  },
+  "yolo_only": {
+    "cold_ms": 644.8,
+    "warm_runs_ms": [
+      19.6,
+      19.8,
+      18.4
+    ],
+    "warm_average_ms": 19.3,
+    "detections": 5,
+    "vlm_trigger_candidates": 3,
+    "summary": [
+      "Worker 1 (helmet: Y, vest: N)"
+    ]
+  },
+  "vlm_assisted_pipeline": {
+    "total_ms": 33069.1,
+    "stages_ms": {
+      "detection": 24.2,
+      "vlm": 14908.6,
+      "rag": 34.8,
+      "llm": 18101.3,
+      "notion": 0.0
+    },
+    "runs": [
+      {
+        "total_ms": 60469.9,
+        "stages_ms": {
+          "detection": 19.0,
+          "vlm": 14687.1,
+          "rag": 26439.2,
+          "llm": 19324.6,
+          "notion": 0.0
+        }
+      },
+      {
+        "total_ms": 33069.1,
+        "stages_ms": {
+          "detection": 24.2,
+          "vlm": 14908.6,
+          "rag": 34.8,
+          "llm": 18101.3,
+          "notion": 0.0
+        }
+      }
+    ],
+    "workers": 1,
+    "immediate_dangers": 0,
+    "violations": 1,
+    "rag_clauses": 2
+  },
+  "bottleneck": "llm"
+}

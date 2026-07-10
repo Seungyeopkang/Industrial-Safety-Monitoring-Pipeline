@@ -49,6 +49,7 @@ def load_document(path) -> Dict:
         "source": p.stem,           # 확장자 제외 파일명(예: 01_산업안전보건법_핵심조문)
         "filename": p.name,
         "filetype": filetype,
+        "path": str(p.resolve()),
     }
 
 

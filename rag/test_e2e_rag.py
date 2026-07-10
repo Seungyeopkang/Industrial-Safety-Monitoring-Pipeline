@@ -10,7 +10,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from rag.retriever import retrieve_for_violations
+from rag.danger_contract import eligible_danger_records
+from rag.query_builder import build_canonical_queries
+from rag.retriever import retrieve_for_query_records
 from llm.reporter import generate_report
 
 # VLM 장면 분석 목업 (헬멧 2명 미착용 + Worker2 조끼 미착용 + 위험구역 인접)
@@ -26,20 +28,26 @@ VLM_MOCK = {
     "scene_context": {"work_zone_type": "construction", "machinery_present": ["굴삭기"],
                       "environmental_hazards": ["굴삭면 가장자리", "위험구역"], "lighting_condition": "good"},
     "overall_description": "건설현장에서 두 근로자가 작업 중. 둘 다 안전모 미착용, Worker 2는 안전조끼도 미착용하고 위험구역 인접.",
-    "immediate_dangers": ["Worker 2 위험구역 인접 상태에서 안전모·안전조끼 미착용"],
+    "immediate_dangers": [{
+        "danger_type": "danger_zone_access",
+        "worker_ids": ["Worker 2"],
+        "description": "Worker 2가 위험구역에 인접한 상태에서 안전모와 안전조끼를 착용하지 않음",
+        "evidence": "YOLO PPE 메타데이터와 장면 분석에서 확인",
+        "confidence": 0.8,
+    }],
+    "analysis_limitations": [],
     "vlm_confidence": 0.8,
 }
 
 
 def main():
-    print("[1] RAG 검색: 위반 설명 → 한국 규정 조항")
-    violations = [
-        "Worker 1 헬멧(안전모) 미착용",
-        "Worker 2 헬멧(안전모) 미착용",
-        "Worker 2 안전조끼 미착용",
-        "Worker 2 위험구역 인접 출입",
-    ]
-    clauses = retrieve_for_violations(violations, top_k=4)
+    print("[1] RAG 검색: structured VLM → canonical query → 한국 규정 조항")
+    danger_contract = eligible_danger_records(VLM_MOCK["immediate_dangers"])
+    canonical_queries = build_canonical_queries(VLM_MOCK["workers"], danger_contract)
+    retrieval = retrieve_for_query_records(canonical_queries)
+    clauses = retrieval["clauses"]
+    print(f"  canonical queries: {[item['query'] for item in canonical_queries]}")
+    print(f"  query traces: {[item['status'] for item in retrieval['query_traces']]}")
     print(f"  검색된 고유 조항: {len(clauses)}건")
     for c in clauses:
         print(f"    - {c['source']} [{c['article']}] {c['title']} (score={c['score']})")
